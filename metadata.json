@@ -1,0 +1,6 @@
+{
+  "name": "MobiHome",
+  "description": "Discover, explore, and book extraordinary homes, luxury villas, modern cabins, and vacation stays worldwide with real-time reservation management and wishlists.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
