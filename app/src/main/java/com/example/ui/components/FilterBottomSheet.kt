@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AmenityIcon
+import com.example.model.ListingPurpose
 import com.example.model.PropertyType
 import com.example.model.SearchFilterState
 import com.example.ui.theme.MobiCoralPrimary
@@ -59,6 +60,7 @@ fun FilterBottomSheet(
     filterState: SearchFilterState,
     matchingHomesCount: Int,
     currency: Currency,
+    onPurposeSelect: (ListingPurpose?) -> Unit = {},
     onPriceRangeChange: (Int, Int) -> Unit,
     onPropertyTypeToggle: (PropertyType) -> Unit,
     onAmenityToggle: (AmenityIcon) -> Unit,
@@ -116,6 +118,58 @@ fun FilterBottomSheet(
                     .padding(vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
+                // Listing Purpose Section
+                Column {
+                    Text(
+                        text = "Listing purpose",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Filter by purchase, rental lease, or BnB stay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val purposes = listOf(
+                            null to "All Purposes",
+                            ListingPurpose.FOR_SALE to "For Sale",
+                            ListingPurpose.FOR_RENT to "For Rent",
+                            ListingPurpose.BNB_STAY to "BnB Stays"
+                        )
+                        purposes.forEach { (purpose, label) ->
+                            val isSelected = filterState.selectedPurpose == purpose
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) MobiCoralPrimary
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .clickable { onPurposeSelect(purpose) }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 12.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
+
                 // Price Range Section
                 Column {
                     Text(

@@ -17,12 +17,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apartment
 import androidx.compose.material.icons.filled.BeachAccess
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Cabin
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Landscape
+import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Water
 import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -105,6 +110,11 @@ private fun getCategoryIcon(iconName: String): ImageVector {
         "Terrain" -> Icons.Default.Landscape
         "Water" -> Icons.Default.Water
         "WbSunny" -> Icons.Default.WbSunny
+        "Sell" -> Icons.Default.Sell
+        "Key" -> Icons.Default.Key
+        "Work" -> Icons.Default.Work
+        "Storefront" -> Icons.Default.Storefront
+        "Business" -> Icons.Default.Business
         else -> Icons.Default.Home
     }
 }

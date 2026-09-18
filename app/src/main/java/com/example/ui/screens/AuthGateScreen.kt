@@ -98,7 +98,7 @@ fun AuthGateScreen(
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Log In, 1: Register
 
     // Form states
-    var loginEmail by remember { mutableStateOf("") }
+    var loginEmail by remember { mutableStateOf(viewModel.getLastUsedEmail()) }
     var loginPassword by remember { mutableStateOf("") }
     var loginPasswordVisible by remember { mutableStateOf(false) }
 
@@ -107,6 +107,9 @@ fun AuthGateScreen(
     var registerPassword by remember { mutableStateOf("") }
     var registerConfirmPassword by remember { mutableStateOf("") }
     var registerPasswordVisible by remember { mutableStateOf(false) }
+
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
+    var forgotPasswordEmail by remember { mutableStateOf("") }
 
     var localError by remember { mutableStateOf<String?>(null) }
     var localSuccessMessage by remember { mutableStateOf<String?>(null) }
@@ -273,23 +276,53 @@ fun AuthGateScreen(
                             .padding(bottom = 16.dp)
                             .testTag("auth_gate_error_banner")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = currentErrorMessage,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium
-                            )
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    imageVector = Icons.Default.ErrorOutline,
+                                    contentDescription = "Error",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = currentErrorMessage,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            if (currentErrorMessage.contains("register", ignoreCase = true) && selectedTab == 0) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        registerEmail = loginEmail
+                                        selectedTab = 1
+                                        localError = null
+                                        viewModel.clearAuthError()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("Switch to Register", fontSize = 12.sp)
+                                }
+                            } else if (currentErrorMessage.contains("already", ignoreCase = true) && selectedTab == 1) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = {
+                                        loginEmail = registerEmail
+                                        selectedTab = 0
+                                        localError = null
+                                        viewModel.clearAuthError()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.align(Alignment.End)
+                                ) {
+                                    Text("Switch to Log In", fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 }
@@ -475,52 +508,26 @@ fun AuthGateScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Pre-registered Demo Account Helper Card
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
+                    // Forgot Password
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.CenterEnd
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = null,
-                                    tint = MobiEmerald,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Verified Registered Account",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MobiEmerald
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
+                        TextButton(
+                            onClick = {
+                                forgotPasswordEmail = loginEmail
+                                showForgotPasswordDialog = true
+                            },
+                            modifier = Modifier.testTag("auth_gate_forgot_password_button")
+                        ) {
                             Text(
-                                text = "Email: alexander@mobihome.com\nPassword: password123",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "Forgot password?",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MobiCoralPrimary
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = {
-                                    loginEmail = "alexander@mobihome.com"
-                                    loginPassword = "password123"
-                                    localError = null
-                                },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("fill_demo_credentials_button")
-                            ) {
-                                Text("Fill Verified Account Credentials", fontSize = 12.sp)
-                            }
                         }
                     }
 
@@ -826,5 +833,70 @@ fun AuthGateScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    if (showForgotPasswordDialog) {
+        var resetEmail by remember { mutableStateOf(forgotPasswordEmail) }
+        var resetError by remember { mutableStateOf<String?>(null) }
+        var isSubmitting by remember { mutableStateOf(false) }
+
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showForgotPasswordDialog = false },
+            title = { Text("Reset Password", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(
+                        text = "Enter your registered email address to receive a password reset link.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = resetEmail,
+                        onValueChange = { resetEmail = it; resetError = null },
+                        label = { Text("Email Address") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (resetError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = resetError ?: "",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (resetEmail.isBlank()) {
+                            resetError = "Please enter your email address."
+                            return@Button
+                        }
+                        isSubmitting = true
+                        viewModel.sendPasswordReset(resetEmail.trim()) { success, msg ->
+                            isSubmitting = false
+                            if (success) {
+                                showForgotPasswordDialog = false
+                                localSuccessMessage = msg ?: "Password reset email sent."
+                            } else {
+                                resetError = msg ?: "Failed to send reset email."
+                            }
+                        }
+                    },
+                    enabled = !isSubmitting,
+                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary)
+                ) {
+                    Text("Send Reset Link")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgotPasswordDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

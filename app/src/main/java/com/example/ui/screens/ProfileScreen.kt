@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,14 +24,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.CurrencyExchange
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.HelpCenter
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
@@ -48,6 +57,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,6 +68,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,29 +87,38 @@ import coil.request.ImageRequest
 import com.example.model.AuthState
 import com.example.ui.components.AuthBottomSheet
 import com.example.ui.components.AuthMode
+import com.example.ui.components.EditProfileDialog
 import com.example.ui.components.GoogleLogoIcon
+import com.example.ui.components.HostNotificationsDialog
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
 import com.example.viewmodel.Currency
 import com.example.viewmodel.MobiHomeViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     viewModel: MobiHomeViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onReplaySplash: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val currency by viewModel.currency.collectAsStateWithLifecycle()
     val creditsBalance by viewModel.userCreditsBalance.collectAsStateWithLifecycle()
+    val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
 
     var showAuthSheet by remember { mutableStateOf(false) }
     var authSheetMode by remember { mutableStateOf(AuthMode.SIGN_IN) }
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showHelpDialog by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -114,6 +135,7 @@ fun ProfileScreen(
                 )
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
         Column(
@@ -143,33 +165,60 @@ fun ProfileScreen(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (user.photoUrl != null) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(user.photoUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = "User profile photo",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(CircleShape)
-                                        .border(2.dp, MobiCoralPrimary, CircleShape)
-                                )
-                            } else {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MobiCoralPrimary,
-                                    modifier = Modifier.size(64.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = user.initials,
-                                            color = Color.White,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 24.sp
-                                        )
+                            // Avatar with click-to-edit badge
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clickable { showEditProfileDialog = true }
+                                    .testTag("profile_avatar_image"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!user.photoUrl.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(user.photoUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = "User profile photo",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(72.dp)
+                                            .clip(CircleShape)
+                                            .border(2.5.dp, MobiCoralPrimary, CircleShape)
+                                    )
+                                } else {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MobiCoralPrimary,
+                                        modifier = Modifier.size(72.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(
+                                                text = user.initials,
+                                                color = Color.White,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 26.sp
+                                            )
+                                        }
                                     }
+                                }
+
+                                // Subtle Camera Badge Overlay
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .border(1.5.dp, MaterialTheme.colorScheme.surfaceVariant, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CameraAlt,
+                                        contentDescription = "Change profile photo",
+                                        tint = MobiCoralPrimary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
                                 }
                             }
 
@@ -201,6 +250,62 @@ fun ProfileScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                if (!user.location.isNullOrBlank()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LocationOn,
+                                            contentDescription = null,
+                                            tint = MobiCoralPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = user.location,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                if (!user.phoneNumber.isNullOrBlank()) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Phone,
+                                            contentDescription = null,
+                                            tint = MobiEmerald,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text(
+                                            text = user.phoneNumber,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!user.bio.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "\"${user.bio}\"",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                )
                             }
                         }
 
@@ -210,51 +315,121 @@ fun ProfileScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surface,
-                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                            Button(
+                                onClick = { showEditProfileDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("edit_profile_button")
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Security,
-                                        contentDescription = null,
-                                        tint = MobiCoralPrimary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "Account ID: ${user.uid.take(8)}...",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Edit Profile",
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
 
-                            TextButton(
+                            OutlinedButton(
                                 onClick = { showSignOutDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
                                 modifier = Modifier.testTag("sign_out_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ExitToApp,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Log Out",
-                                    color = MaterialTheme.colorScheme.error,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
+                    }
+                }
+
+                // Personal Details Card
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth().testTag("personal_details_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Personal Details",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            TextButton(
+                                onClick = { showEditProfileDialog = true },
+                                modifier = Modifier.testTag("edit_details_button")
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Edit", fontSize = 13.sp, color = MobiCoralPrimary)
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+
+                        ProfileDetailRow(
+                            icon = Icons.Default.Person,
+                            label = "Full Name",
+                            value = user.displayName,
+                            onClick = { showEditProfileDialog = true }
+                        )
+
+                        ProfileDetailRow(
+                            icon = Icons.Default.Email,
+                            label = "Email Address",
+                            value = user.email,
+                            badge = "Verified"
+                        )
+
+                        ProfileDetailRow(
+                            icon = Icons.Default.Phone,
+                            label = "Phone Number",
+                            value = user.phoneNumber ?: "Tap to add phone number",
+                            isPlaceholder = user.phoneNumber.isNullOrBlank(),
+                            onClick = { showEditProfileDialog = true }
+                        )
+
+                        ProfileDetailRow(
+                            icon = Icons.Default.LocationOn,
+                            label = "Home Location",
+                            value = user.location ?: "Tap to set location",
+                            isPlaceholder = user.location.isNullOrBlank(),
+                            onClick = { showEditProfileDialog = true }
+                        )
+
+                        ProfileDetailRow(
+                            icon = Icons.Default.Info,
+                            label = "Bio & About",
+                            value = user.bio ?: "Tap to add a bio about yourself",
+                            isPlaceholder = user.bio.isNullOrBlank(),
+                            onClick = { showEditProfileDialog = true }
+                        )
                     }
                 }
             } else {
@@ -406,7 +581,7 @@ fun ProfileScreen(
                     }
 
                     Text(
-                        text = "$${creditsBalance}",
+                        text = "${currency.symbol}${creditsBalance}",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = MobiEmerald
@@ -456,9 +631,9 @@ fun ProfileScreen(
 
                 ProfileSettingItem(
                     icon = Icons.Default.Notifications,
-                    title = "Notifications",
-                    subtitle = "Booking updates, messages & deals",
-                    onClick = {}
+                    title = "Host & Guest Notifications",
+                    subtitle = if (unreadNotificationCount > 0) "$unreadNotificationCount unread alert(s) on your listings" else "Booking confirmations, host alerts & wishlist saves",
+                    onClick = { showNotificationsDialog = true }
                 )
             }
 
@@ -492,8 +667,23 @@ fun ProfileScreen(
                     subtitle = "Data security & hosting guidelines",
                     onClick = {}
                 )
+
+                ProfileSettingItem(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "About MobiHome & Slogan",
+                    subtitle = "Replay opening animation ('FindSpace')",
+                    onClick = onReplaySplash
+                )
             }
         }
+    }
+
+    // Host & Guest Notifications Modal Dialog
+    if (showNotificationsDialog) {
+        HostNotificationsDialog(
+            viewModel = viewModel,
+            onDismiss = { showNotificationsDialog = false }
+        )
     }
 
     // Auth Bottom Sheet Modal
@@ -599,6 +789,31 @@ fun ProfileScreen(
             }
         )
     }
+
+    // Edit Profile Dialog
+    if (showEditProfileDialog && currentUser != null) {
+        val activeUser = currentUser!!
+        EditProfileDialog(
+            user = activeUser,
+            onDismiss = { showEditProfileDialog = false },
+            onSave = { newName, newPhone, newBio, newLoc, newPhoto ->
+                viewModel.updateUserProfile(
+                    displayName = newName,
+                    phoneNumber = newPhone,
+                    bio = newBio,
+                    location = newLoc,
+                    photoUrl = newPhoto
+                ) { success, message ->
+                    showEditProfileDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            message ?: if (success) "Profile updated successfully!" else "Failed to update profile"
+                        )
+                    }
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -657,3 +872,71 @@ fun ProfileSettingItem(
         }
     }
 }
+
+@Composable
+private fun ProfileDetailRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    badge: String? = null,
+    isPlaceholder: Boolean = false,
+    onClick: (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (isPlaceholder) FontWeight.Normal else FontWeight.Medium,
+                    color = if (isPlaceholder) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        if (badge != null) {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MobiEmerald.copy(alpha = 0.15f)
+            ) {
+                Text(
+                    text = badge,
+                    color = MobiEmerald,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                )
+            }
+        } else if (onClick != null && isPlaceholder) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                contentDescription = null,
+                tint = MobiCoralPrimary,
+                modifier = Modifier.size(12.dp)
+            )
+        }
+    }
+}
+

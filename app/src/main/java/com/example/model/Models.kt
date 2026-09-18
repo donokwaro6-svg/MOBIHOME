@@ -38,7 +38,8 @@ data class BookingReservation(
     val status: BookingStatus,
     val guestName: String,
     val specialRequests: String = "",
-    val createdTimestamp: Long = System.currentTimeMillis()
+    val createdTimestamp: Long = System.currentTimeMillis(),
+    val listingPurpose: String = "BNB_STAY"
 )
 
 enum class BookingStatus(val label: String) {
@@ -48,9 +49,28 @@ enum class BookingStatus(val label: String) {
     CANCELLED("Cancelled")
 }
 
+data class HostNotification(
+    val id: String,
+    val hostId: String,
+    val propertyId: String,
+    val propertyTitle: String,
+    val type: NotificationType,
+    val title: String,
+    val message: String,
+    val guestName: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
+)
+
+enum class NotificationType(val label: String) {
+    BOOKING("Booking"),
+    LIKE("Wishlist Like")
+}
+
 data class SearchFilterState(
     val query: String = "",
     val selectedCategory: String = "all",
+    val selectedPurpose: ListingPurpose? = null,
     val minPrice: Int = 0,
     val maxPrice: Int = 1500,
     val selectedPropertyTypes: Set<PropertyType> = emptySet(),

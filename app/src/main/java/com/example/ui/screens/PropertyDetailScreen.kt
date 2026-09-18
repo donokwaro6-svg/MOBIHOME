@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.model.ListingPurpose
 import com.example.model.Property
 import com.example.model.Review
 import com.example.model.allPhotoItems
@@ -131,18 +132,29 @@ fun PropertyDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = " / night",
+                                text = activeProperty.priceSuffix,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(start = 2.dp)
                             )
                         }
+                        val subtitle = when {
+                            activeProperty.isForSale -> "1% Earnest deposit: ${currency.format((activeProperty.pricePerNight * 0.01).toInt().coerceAtLeast(1000))}"
+                            activeProperty.isForRent -> "Lease security: 1 mo rent"
+                            else -> "Est. ${currency.format(estimatedTotalUsd)} for 5 nights"
+                        }
                         Text(
-                            text = "Est. ${currency.format(estimatedTotalUsd)} for 5 nights",
+                            text = subtitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textDecoration = TextDecoration.Underline
                         )
+                    }
+
+                    val buttonLabel = when {
+                        activeProperty.isForSale -> "Buy / Offer"
+                        activeProperty.isForRent -> "Apply Lease"
+                        else -> "Reserve"
                     }
 
                     Button(
@@ -152,10 +164,10 @@ fun PropertyDetailScreen(
                             .testTag("reserve_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 28.dp)
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp)
                     ) {
                         Text(
-                            text = "Reserve",
+                            text = buttonLabel,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -352,8 +364,43 @@ fun PropertyDetailScreen(
                     }
                 }
 
-                // Title & Location
-                Column {
+                // Title, Purpose Badge & Location
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = when (activeProperty.listingPurpose) {
+                                ListingPurpose.FOR_SALE -> Color(0xFF0D47A1)
+                                ListingPurpose.FOR_RENT -> Color(0xFF1B5E20)
+                                ListingPurpose.BNB_STAY -> MobiCoralPrimary
+                            }
+                        ) {
+                            Text(
+                                text = activeProperty.listingPurpose.displayName,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = activeProperty.propertyType.displayName,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
                     Text(
                         text = activeProperty.title,
                         style = MaterialTheme.typography.headlineMedium,
@@ -361,18 +408,21 @@ fun PropertyDetailScreen(
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
                     Text(
-                        text = "${activeProperty.propertyType.displayName} in ${activeProperty.city}, ${activeProperty.country}",
+                        text = "${activeProperty.address.ifBlank { activeProperty.city }}, ${activeProperty.country}",
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    val specsText = if (activeProperty.isOfficeOrCommercial) {
+                        val parking = if (activeProperty.parkingSpaces > 0) " · ${activeProperty.parkingSpaces} parking bays" else ""
+                        "${activeProperty.squareFeet} sq ft · Zoning: ${activeProperty.zoningType}$parking · Max capacity: ${activeProperty.maxGuests} people"
+                    } else {
+                        "${activeProperty.maxGuests} guests · ${activeProperty.bedroomCount} bedrooms · ${activeProperty.bedCount} beds · ${activeProperty.bathroomCount} baths · ${activeProperty.squareFeet} sq ft"
+                    }
 
                     Text(
-                        text = "${activeProperty.maxGuests} guests · ${activeProperty.bedroomCount} bedrooms · ${activeProperty.bedCount} beds · ${activeProperty.bathroomCount} baths · ${activeProperty.squareFeet} sq ft",
+                        text = specsText,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

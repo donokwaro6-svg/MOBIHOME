@@ -1,5 +1,11 @@
 package com.example.ui.navigation
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -24,6 +30,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -44,6 +53,7 @@ import com.example.ui.screens.AuthGateScreen
 import com.example.ui.screens.BookingScreen
 import com.example.ui.screens.ExploreScreen
 import com.example.ui.screens.HostScreen
+import com.example.ui.screens.OpeningSplashScreen
 import com.example.ui.screens.ProfileScreen
 import com.example.ui.screens.PropertyDetailScreen
 import com.example.ui.screens.TripsScreen
@@ -79,28 +89,29 @@ fun MobiHomeApp(
     navController: NavHostController = rememberNavController()
 ) {
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    var showSplash by rememberSaveable { mutableStateOf(true) }
 
-    if (currentUser == null) {
-        AuthGateScreen(viewModel = viewModel)
-        return
-    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (currentUser == null) {
+            AuthGateScreen(viewModel = viewModel)
+        } else {
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentRoute = navBackStackEntry?.destination?.route
 
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
+            val wishlistedIds by viewModel.wishlistedIds.collectAsStateWithLifecycle()
+            val bookings by viewModel.allBookings.collectAsStateWithLifecycle()
+            val allProperties by viewModel.allProperties.collectAsStateWithLifecycle()
+            val unreadNotificationsCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
 
-    val wishlistedIds by viewModel.wishlistedIds.collectAsStateWithLifecycle()
-    val bookings by viewModel.allBookings.collectAsStateWithLifecycle()
-    val allProperties by viewModel.allProperties.collectAsStateWithLifecycle()
+            val showBottomBar = currentRoute in listOf(
+                BottomNavItem.Explore.route,
+                BottomNavItem.Wishlists.route,
+                BottomNavItem.Trips.route,
+                BottomNavItem.Host.route,
+                BottomNavItem.Profile.route
+            )
 
-    val showBottomBar = currentRoute in listOf(
-        BottomNavItem.Explore.route,
-        BottomNavItem.Wishlists.route,
-        BottomNavItem.Trips.route,
-        BottomNavItem.Host.route,
-        BottomNavItem.Profile.route
-    )
-
-    Scaffold(
+            Scaffold(
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar(
@@ -143,6 +154,19 @@ fun MobiHomeApp(
                                                 if (bookings.isNotEmpty()) {
                                                     Badge(containerColor = MobiCoralPrimary, contentColor = Color.White) {
                                                         Text("${bookings.size}")
+                                                    }
+                                                }
+                                            }
+                                        ) {
+                                            Icon(imageVector = icon, contentDescription = item.title)
+                                        }
+                                    }
+                                    BottomNavItem.Host -> {
+                                        BadgedBox(
+                                            badge = {
+                                                if (unreadNotificationsCount > 0) {
+                                                    Badge(containerColor = MobiCoralPrimary, contentColor = Color.White) {
+                                                        Text("$unreadNotificationsCount")
                                                     }
                                                 }
                                             }
@@ -222,7 +246,10 @@ fun MobiHomeApp(
             }
 
             composable(BottomNavItem.Profile.route) {
-                ProfileScreen(viewModel = viewModel)
+                ProfileScreen(
+                    viewModel = viewModel,
+                    onReplaySplash = { showSplash = true }
+                )
             }
 
             composable(
@@ -262,6 +289,19 @@ fun MobiHomeApp(
                     )
                 }
             }
+        }
+    }
+}
+
+        // Animated Opening Splash Screen overlay when someone opens the app
+        AnimatedVisibility(
+            visible = showSplash,
+            enter = fadeIn(),
+            exit = fadeOut(animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing))
+        ) {
+            OpeningSplashScreen(
+                onAnimationFinished = { showSplash = false }
+            )
         }
     }
 }

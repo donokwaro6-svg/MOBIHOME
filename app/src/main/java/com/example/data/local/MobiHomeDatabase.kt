@@ -9,19 +9,17 @@ import androidx.room.RoomDatabase
     entities = [
         WishlistEntity::class,
         BookingEntity::class,
-        CustomListingEntity::class,
         PropertyPhotoEntity::class,
-        UserAccountEntity::class
+        HostNotificationEntity::class
     ],
-    version = 3,
+    version = 6,
     exportSchema = false
 )
 abstract class MobiHomeDatabase : RoomDatabase() {
     abstract fun wishlistDao(): WishlistDao
     abstract fun bookingDao(): BookingDao
-    abstract fun customListingDao(): CustomListingDao
     abstract fun propertyPhotoDao(): PropertyPhotoDao
-    abstract fun userAccountDao(): UserAccountDao
+    abstract fun hostNotificationDao(): HostNotificationDao
 
     companion object {
         @Volatile

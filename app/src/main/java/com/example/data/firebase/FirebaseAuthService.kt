@@ -1,26 +1,25 @@
 package com.example.data.firebase
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
-import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
-import com.example.data.local.UserAccountDao
-import com.example.data.local.UserAccountEntity
 import com.example.model.AuthState
 import com.example.model.AuthUser
 import com.google.android.gms.tasks.Task
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.UserProfileChangeRequest
+import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,146 +27,272 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.security.MessageDigest
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class FirebaseAuthService(
     private val context: Context,
-    private val scope: CoroutineScope,
-    private val userAccountDao: UserAccountDao? = null
+    private val scope: CoroutineScope
 ) {
     companion object {
-        fun hashPassword(password: String): String {
-            val digest = MessageDigest.getInstance("SHA-256")
-            val bytes = digest.digest(password.toByteArray(Charsets.UTF_8))
-            return bytes.joinToString("") { "%02x".format(it) }
+        private const val TAG = "FirebaseAuthService"
+    }
+
+    private val isFirebaseAvailable: Boolean by lazy {
+        try {
+            FirebaseApp.getApps(context).isNotEmpty() || FirebaseApp.initializeApp(context) != null
+        } catch (e: Exception) {
+            Log.w(TAG, "Firebase availability check: ${e.message}")
+            false
         }
-    }
-
-    private val prefs by lazy {
-        context.getSharedPreferences("mobihome_auth_prefs", Context.MODE_PRIVATE)
-    }
-
-    private fun saveActiveSession(email: String) {
-        prefs.edit().putString("active_session_email", email.lowercase().trim()).apply()
-    }
-
-    private fun getActiveSessionEmail(): String? {
-        return prefs.getString("active_session_email", null)
-    }
-
-    private fun clearActiveSession() {
-        prefs.edit().remove("active_session_email").apply()
     }
 
     private val auth: FirebaseAuth? by lazy {
-        try {
-            FirebaseAuth.getInstance()
-        } catch (e: Throwable) {
-            Log.w("FirebaseAuthService", "FirebaseAuth instance unavailable: ${e.message}")
-            null
-        }
+        FirebaseConfig.getAuth(context)
+            ?: if (isFirebaseAvailable) runCatching { FirebaseAuth.getInstance() }.getOrNull() else null
+    }
+
+    private val firestore: FirebaseFirestore? by lazy {
+        FirebaseConfig.getFirestore(context)
+            ?: if (isFirebaseAvailable) runCatching { FirebaseFirestore.getInstance() }.getOrNull() else null
     }
 
     private val credentialManager: CredentialManager by lazy {
         CredentialManager.create(context)
     }
 
-    private val _authState = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
-    val authState: StateFlow<AuthState> = _authState.asStateFlow()
-
     private val _currentUser = MutableStateFlow<AuthUser?>(null)
     val currentUser: StateFlow<AuthUser?> = _currentUser.asStateFlow()
 
-    init {
-        scope.launch(Dispatchers.IO) {
-            try {
-                // Ensure default demo account is registered in local database if empty
-                if (userAccountDao != null && userAccountDao.getUserCount() == 0) {
-                    val demoUser = UserAccountEntity(
-                        email = "alexander@mobihome.com",
-                        passwordHash = hashPassword("password123"),
-                        displayName = "Alexander Wright",
-                        uid = "usr_demo_alexander",
-                        isSuperhost = true,
-                        provider = "password"
-                    )
-                    userAccountDao.insertUser(demoUser)
-                }
+    private val _authState = MutableStateFlow<AuthState>(AuthState.Unauthenticated)
+    val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
-                // Check active saved session
-                val savedEmail = getActiveSessionEmail()
-                if (savedEmail != null) {
-                    val account = userAccountDao?.getUserByEmail(savedEmail)
-                    if (account != null) {
-                        val mobiUser = AuthUser(
-                            uid = account.uid,
-                            displayName = account.displayName,
-                            email = account.email,
-                            isSuperhost = account.isSuperhost,
-                            provider = account.provider
-                        )
-                        _currentUser.value = mobiUser
-                        _authState.value = AuthState.Authenticated(mobiUser)
-                    } else {
-                        clearActiveSession()
-                        _currentUser.value = null
-                        _authState.value = AuthState.Unauthenticated
+    private val authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+        val fbUser = firebaseAuth.currentUser
+        if (fbUser != null) {
+            val user = mapFirebaseUser(fbUser)
+            _currentUser.value = user
+            _authState.value = AuthState.Authenticated(user)
+            Log.d(TAG, "onAuthStateChanged: Authenticated as ${user.email} (${user.uid})")
+
+            // Load extended profile data (bio, location, phone) from Firestore users/{uid}
+            scope.launch(Dispatchers.IO) {
+                try {
+                    firestore?.collection("users")?.document(fbUser.uid)?.get()?.await()?.let { doc ->
+                        if (doc.exists()) {
+                            val enriched = user.copy(
+                                phoneNumber = doc.getString("phoneNumber") ?: user.phoneNumber,
+                                bio = doc.getString("bio") ?: user.bio,
+                                location = doc.getString("location") ?: user.location,
+                                isSuperhost = doc.getBoolean("isSuperhost") ?: user.isSuperhost
+                            )
+                            _currentUser.value = enriched
+                            _authState.value = AuthState.Authenticated(enriched)
+                        }
                     }
-                } else {
-                    _currentUser.value = null
-                    _authState.value = AuthState.Unauthenticated
+                } catch (e: Exception) {
+                    Log.w(TAG, "Firestore user profile fetch: ${e.message}")
                 }
-            } catch (e: Throwable) {
-                Log.w("FirebaseAuthService", "Auth initialization exception: ${e.message}")
-                _currentUser.value = null
-                _authState.value = AuthState.Unauthenticated
             }
+        } else {
+            _currentUser.value = null
+            _authState.value = AuthState.Unauthenticated
+            Log.d(TAG, "onAuthStateChanged: Unauthenticated")
         }
     }
 
+    init {
+        // 1. Check initial user immediately
+        val initialUser = auth?.currentUser
+        if (initialUser != null) {
+            val user = mapFirebaseUser(initialUser)
+            _currentUser.value = user
+            _authState.value = AuthState.Authenticated(user)
+        }
+
+        // 2. Attach real-time persistent session listener (Requirement 1: persistent session on onAuthStateChanged)
+        try {
+            auth?.addAuthStateListener(authStateListener)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not attach AuthStateListener: ${e.message}")
+        }
+    }
+
+    fun getLastUsedEmail(): String {
+        return auth?.currentUser?.email ?: ""
+    }
+
     private fun mapFirebaseUser(user: FirebaseUser): AuthUser {
-        val email = user.email ?: "guest@mobihome.com"
+        val email = user.email ?: ""
         val name = user.displayName?.takeIf { it.isNotBlank() }
             ?: email.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-        val isSuperhost = email.contains("host", ignoreCase = true) ||
-                name.contains("Alexander", ignoreCase = true) ||
-                user.uid.startsWith("host")
+        val isSuperhost = email.contains("host", ignoreCase = true) || user.uid.startsWith("host")
 
         return AuthUser(
             uid = user.uid,
-            displayName = name,
+            displayName = name.ifBlank { "MobiHome Explorer" },
             email = email,
             photoUrl = user.photoUrl?.toString(),
             isAnonymous = user.isAnonymous,
             isEmailVerified = user.isEmailVerified,
             isSuperhost = isSuperhost,
             memberSince = "2026",
-            provider = user.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "Firebase"
+            provider = user.providerData.firstOrNull { it.providerId != "firebase" }?.providerId ?: "password"
         )
     }
 
-    private fun getWebClientId(): String {
-        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-        return if (resId != 0) {
-            try {
-                context.getString(resId)
-            } catch (e: Exception) {
-                "1084282436848-mobihome.apps.googleusercontent.com"
+    /**
+     * Requirement 1: Signup with email/password.
+     * Any new user can create an account and log back in on any device.
+     */
+    suspend fun signUpWithEmail(name: String, email: String, password: String): Result<AuthUser> = withContext(Dispatchers.IO) {
+        _authState.value = AuthState.Authenticating
+        val cleanEmail = email.trim()
+        val cleanName = name.trim().ifBlank {
+            cleanEmail.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
+        }
+
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+            val message = "Please enter a valid email address."
+            _authState.value = AuthState.Error(message)
+            return@withContext Result.failure(Exception(message))
+        }
+        if (password.length < 6) {
+            val message = "Password must be at least 6 characters."
+            _authState.value = AuthState.Error(message)
+            return@withContext Result.failure(Exception(message))
+        }
+
+        val fbAuth = auth
+        if (fbAuth == null) {
+            val msg = "Firebase Auth service unavailable. Please check internet connection."
+            _authState.value = AuthState.Error(msg)
+            return@withContext Result.failure(Exception(msg))
+        }
+
+        try {
+            val authResult = fbAuth.createUserWithEmailAndPassword(cleanEmail, password).awaitTask()
+            val fbUser = authResult.user ?: throw IllegalStateException("Firebase user was null after creation.")
+
+            // Set display name in Firebase profile
+            if (cleanName.isNotBlank()) {
+                val profileUpdate = UserProfileChangeRequest.Builder()
+                    .setDisplayName(cleanName)
+                    .build()
+                fbUser.updateProfile(profileUpdate).awaitTask()
             }
-        } else {
-            "1084282436848-mobihome.apps.googleusercontent.com"
+
+            // Sync user profile document to Firestore (Requirement 4 & security rules)
+            try {
+                val profileData = hashMapOf(
+                    "uid" to fbUser.uid,
+                    "email" to cleanEmail,
+                    "displayName" to cleanName,
+                    "createdAt" to System.currentTimeMillis()
+                )
+                firestore?.collection("users")?.document(fbUser.uid)?.set(profileData)?.await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Firestore user creation sync: ${e.message}")
+            }
+
+            val mobiUser = mapFirebaseUser(fbUser).copy(displayName = cleanName)
+            _currentUser.value = mobiUser
+            _authState.value = AuthState.Authenticated(mobiUser)
+            Result.success(mobiUser)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Failed to create account. Please try again."
+            _authState.value = AuthState.Error(errorMsg)
+            Result.failure(Exception(errorMsg, e))
         }
     }
 
-    suspend fun signInWithGoogle(activityContext: Context): Result<AuthUser> {
+    /**
+     * Requirement 1: Login with email/password.
+     * Any new user can log back in on any device.
+     */
+    suspend fun signInWithEmail(email: String, password: String): Result<AuthUser> = withContext(Dispatchers.IO) {
+        _authState.value = AuthState.Authenticating
+        val cleanEmail = email.trim()
+
+        if (cleanEmail.isBlank()) {
+            val message = "Please enter your email address."
+            _authState.value = AuthState.Error(message)
+            return@withContext Result.failure(Exception(message))
+        }
+        if (password.isBlank()) {
+            val message = "Please enter your password."
+            _authState.value = AuthState.Error(message)
+            return@withContext Result.failure(Exception(message))
+        }
+
+        val fbAuth = auth
+        if (fbAuth == null) {
+            val msg = "Firebase Auth service unavailable. Please check internet connection."
+            _authState.value = AuthState.Error(msg)
+            return@withContext Result.failure(Exception(msg))
+        }
+
+        try {
+            val authResult = fbAuth.signInWithEmailAndPassword(cleanEmail, password).awaitTask()
+            val fbUser = authResult.user ?: throw IllegalStateException("Firebase user was null after sign in.")
+            val mobiUser = mapFirebaseUser(fbUser)
+            _currentUser.value = mobiUser
+            _authState.value = AuthState.Authenticated(mobiUser)
+            Result.success(mobiUser)
+        } catch (e: Exception) {
+            val errorMsg = e.localizedMessage ?: "Invalid email or password. Please verify your credentials."
+            _authState.value = AuthState.Error(errorMsg)
+            Result.failure(Exception(errorMsg, e))
+        }
+    }
+
+    /**
+     * Requirement 1: Password reset via Firebase Auth.
+     */
+    suspend fun sendPasswordReset(email: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val cleanEmail = email.trim()
+        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
+            return@withContext Result.failure(Exception("Please enter a valid email address."))
+        }
+
+        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Auth is unavailable."))
+        try {
+            fbAuth.sendPasswordResetEmail(cleanEmail).awaitTask()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(Exception(e.localizedMessage ?: "Failed to send password reset email.", e))
+        }
+    }
+
+    /**
+     * Requirement 1: Logout with Firebase Auth.
+     */
+    fun signOut() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+            } catch (e: Exception) {
+                Log.w(TAG, "Credential Manager clear: ${e.message}")
+            }
+
+            try {
+                auth?.signOut()
+            } catch (e: Exception) {
+                Log.w(TAG, "Firebase Auth sign out: ${e.message}")
+            }
+
+            _currentUser.value = null
+            _authState.value = AuthState.Unauthenticated
+        }
+    }
+
+    suspend fun signInWithGoogle(activityContext: Context): Result<AuthUser> = withContext(Dispatchers.IO) {
         _authState.value = AuthState.Authenticating
 
-        return try {
+        try {
             val webClientId = getWebClientId()
-
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
                 .setServerClientId(webClientId)
@@ -186,216 +311,92 @@ class FirebaseAuthService(
             val credential = result.credential
             if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                val googleEmail = googleIdTokenCredential.id.lowercase().trim()
+                val idToken = googleIdTokenCredential.idToken
 
-                // Check if account registered or register Google user
-                val existing = withContext(Dispatchers.IO) {
-                    userAccountDao?.getUserByEmail(googleEmail)
+                val fbAuth = auth
+                if (fbAuth != null) {
+                    val firebaseCred = GoogleAuthProvider.getCredential(idToken, null)
+                    val authResult = fbAuth.signInWithCredential(firebaseCred).awaitTask()
+                    val fbUser = authResult.user ?: throw IllegalStateException("Firebase user was null after Google sign in.")
+                    val mobiUser = mapFirebaseUser(fbUser)
+                    _currentUser.value = mobiUser
+                    _authState.value = AuthState.Authenticated(mobiUser)
+                    Result.success(mobiUser)
+                } else {
+                    throw IllegalStateException("Firebase Auth not initialized.")
                 }
-                val userEntity = existing ?: run {
-                    val newEntity = UserAccountEntity(
-                        email = googleEmail,
-                        passwordHash = hashPassword("google_oauth_${googleEmail}"),
-                        displayName = googleIdTokenCredential.displayName ?: googleEmail.substringBefore("@"),
-                        uid = "usr_g_${Math.abs(googleEmail.hashCode()).toString().take(8)}",
-                        isSuperhost = false,
-                        provider = "google.com"
-                    )
-                    withContext(Dispatchers.IO) {
-                        userAccountDao?.insertUser(newEntity)
-                    }
-                    newEntity
-                }
-
-                val mobiUser = AuthUser(
-                    uid = userEntity.uid,
-                    displayName = userEntity.displayName,
-                    email = userEntity.email,
-                    photoUrl = googleIdTokenCredential.profilePictureUri?.toString(),
-                    isSuperhost = userEntity.isSuperhost,
-                    provider = "google.com"
-                )
-                saveActiveSession(googleEmail)
-                _currentUser.value = mobiUser
-                _authState.value = AuthState.Authenticated(mobiUser)
-                Result.success(mobiUser)
             } else {
-                throw IllegalStateException("Unexpected credential type returned from Credential Manager.")
+                throw IllegalStateException("Unexpected credential returned.")
             }
         } catch (e: GetCredentialCancellationException) {
             val prevUser = _currentUser.value
-            if (prevUser != null) {
-                _authState.value = AuthState.Authenticated(prevUser)
-            } else {
-                _authState.value = AuthState.Unauthenticated
-            }
+            _authState.value = if (prevUser != null) AuthState.Authenticated(prevUser) else AuthState.Unauthenticated
             Result.failure(e)
         } catch (e: NoCredentialException) {
-            val msg = "No Google account found on this device. Please log in or register with your account email and password."
+            val msg = "No Google account found. Please sign in with email and password."
             _authState.value = AuthState.Error(msg)
             Result.failure(Exception(msg, e))
         } catch (e: Exception) {
-            val msg = "Google Sign-In failed: ${e.message ?: "Please log in with your email and password."}"
+            val msg = e.localizedMessage ?: "Google Sign-In failed. Please sign in with email and password."
             _authState.value = AuthState.Error(msg)
             Result.failure(Exception(msg, e))
         }
     }
 
-    suspend fun signInWithEmail(email: String, password: String): Result<AuthUser> {
-        _authState.value = AuthState.Authenticating
-        val cleanEmail = email.trim().lowercase()
-
-        if (cleanEmail.isBlank()) {
-            val message = "Please enter your email address."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-        if (password.isBlank()) {
-            val message = "Please enter your password."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-
-        // STRICT CHECK: User MUST be registered in the system
-        val registeredAccount = withContext(Dispatchers.IO) {
-            userAccountDao?.getUserByEmail(cleanEmail)
-        }
-
-        if (registeredAccount == null) {
-            val message = "Access Denied: No account found with email '$cleanEmail'. You must register an account first."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-
-        // STRICT CHECK: Password MUST match the registered user's password
-        val inputHash = hashPassword(password)
-        if (registeredAccount.passwordHash != inputHash) {
-            val message = "Access Denied: Incorrect password. The password does not match the registered account for '$cleanEmail'."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-
-        // Synchronize with Firebase Auth if available
-        val firebaseAuth = auth
-        if (firebaseAuth != null) {
+    private fun getWebClientId(): String {
+        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        return if (resId != 0) {
             try {
-                firebaseAuth.signInWithEmailAndPassword(cleanEmail, password).awaitTask()
+                context.getString(resId)
             } catch (e: Exception) {
-                Log.w("FirebaseAuthService", "Remote Firebase signin sync: ${e.message}")
+                "1084282436848-mobihome.apps.googleusercontent.com"
             }
+        } else {
+            "1084282436848-mobihome.apps.googleusercontent.com"
         }
-
-        val mobiUser = AuthUser(
-            uid = registeredAccount.uid,
-            displayName = registeredAccount.displayName,
-            email = registeredAccount.email,
-            isSuperhost = registeredAccount.isSuperhost,
-            provider = registeredAccount.provider
-        )
-
-        saveActiveSession(cleanEmail)
-        _currentUser.value = mobiUser
-        _authState.value = AuthState.Authenticated(mobiUser)
-        return Result.success(mobiUser)
     }
 
-    suspend fun signUpWithEmail(name: String, email: String, password: String): Result<AuthUser> {
-        _authState.value = AuthState.Authenticating
-        val cleanEmail = email.trim().lowercase()
-        val cleanName = name.trim().ifBlank {
-            cleanEmail.substringBefore("@").replace(".", " ").replaceFirstChar { it.uppercase() }
-        }
+    suspend fun updateUserProfile(
+        displayName: String,
+        phoneNumber: String?,
+        bio: String?,
+        location: String?,
+        photoUrl: String?
+    ): Result<AuthUser> = withContext(Dispatchers.IO) {
+        val current = _currentUser.value ?: return@withContext Result.failure(Exception("No user logged in"))
+        val fbAuth = auth ?: return@withContext Result.failure(Exception("Firebase Auth unavailable"))
+        val fbUser = fbAuth.currentUser ?: return@withContext Result.failure(Exception("No current user"))
 
-        if (cleanEmail.isBlank() || !cleanEmail.contains("@")) {
-            val message = "Please enter a valid email address."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-        if (password.length < 6) {
-            val message = "Password must be at least 6 characters."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-
-        // Check if user is already registered
-        val existing = withContext(Dispatchers.IO) {
-            userAccountDao?.getUserByEmail(cleanEmail)
-        }
-        if (existing != null) {
-            val message = "An account with email '$cleanEmail' is already registered. Please log in with your password."
-            _authState.value = AuthState.Error(message)
-            return Result.failure(Exception(message))
-        }
-
-        val newUid = "usr_${System.currentTimeMillis().toString().takeLast(6)}_${Math.abs(cleanEmail.hashCode()).toString().take(4)}"
-        val userEntity = UserAccountEntity(
-            email = cleanEmail,
-            passwordHash = hashPassword(password),
-            displayName = cleanName,
-            uid = newUid,
-            isSuperhost = cleanEmail.contains("host") || cleanName.contains("Alexander", ignoreCase = true),
-            provider = "password"
-        )
-
-        withContext(Dispatchers.IO) {
-            userAccountDao?.insertUser(userEntity)
-        }
-
-        val firebaseAuth = auth
-        if (firebaseAuth != null) {
-            try {
-                val authResult = firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password).awaitTask()
-                val firebaseUser = authResult.user
-                if (firebaseUser != null && cleanName.isNotBlank()) {
-                    val profileUpdates = UserProfileChangeRequest.Builder()
-                        .setDisplayName(cleanName)
-                        .build()
-                    firebaseUser.updateProfile(profileUpdates).awaitTask()
-                }
-            } catch (e: Exception) {
-                Log.w("FirebaseAuthService", "Remote Firebase signup sync: ${e.message}")
+        try {
+            val builder = UserProfileChangeRequest.Builder()
+                .setDisplayName(displayName.trim().ifBlank { current.displayName })
+            if (!photoUrl.isNullOrBlank()) {
+                builder.setPhotoUri(Uri.parse(photoUrl))
             }
-        }
+            fbUser.updateProfile(builder.build()).awaitTask()
 
-        val mobiUser = AuthUser(
-            uid = userEntity.uid,
-            displayName = userEntity.displayName,
-            email = userEntity.email,
-            isSuperhost = userEntity.isSuperhost,
-            provider = "password"
-        )
+            // Update Firestore user document
+            val updates = hashMapOf<String, Any>(
+                "displayName" to displayName,
+                "phoneNumber" to (phoneNumber ?: ""),
+                "bio" to (bio ?: ""),
+                "location" to (location ?: ""),
+                "photoUrl" to (photoUrl ?: "")
+            )
+            firestore?.collection("users")?.document(fbUser.uid)?.set(updates)?.await()
 
-        saveActiveSession(cleanEmail)
-        _currentUser.value = mobiUser
-        _authState.value = AuthState.Authenticated(mobiUser)
-        return Result.success(mobiUser)
-    }
-
-    suspend fun sendPasswordReset(email: String): Result<Unit> {
-        val firebaseAuth = auth ?: return Result.success(Unit)
-        return try {
-            firebaseAuth.sendPasswordResetEmail(email.trim()).awaitTask()
-            Result.success(Unit)
+            val updatedUser = current.copy(
+                displayName = displayName.trim().ifBlank { current.displayName },
+                phoneNumber = phoneNumber?.trim()?.ifBlank { null },
+                bio = bio?.trim()?.ifBlank { null },
+                location = location?.trim()?.ifBlank { null },
+                photoUrl = photoUrl?.trim()?.ifBlank { null }
+            )
+            _currentUser.value = updatedUser
+            _authState.value = AuthState.Authenticated(updatedUser)
+            Result.success(updatedUser)
         } catch (e: Exception) {
-            Result.success(Unit)
-        }
-    }
-
-    fun signOut() {
-        scope.launch(Dispatchers.IO) {
-            clearActiveSession()
-            try {
-                credentialManager.clearCredentialState(ClearCredentialStateRequest())
-            } catch (e: Exception) {
-                Log.w("FirebaseAuthService", "Could not clear credential manager state: ${e.message}")
-            }
-            try {
-                auth?.signOut()
-            } catch (e: Exception) {
-                Log.w("FirebaseAuthService", "Auth sign out: ${e.message}")
-            }
-            _currentUser.value = null
-            _authState.value = AuthState.Unauthenticated
+            Result.failure(e)
         }
     }
 

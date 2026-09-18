@@ -35,6 +35,10 @@ import androidx.compose.material.icons.filled.AttachMoney
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.BookmarkAdded
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Star
@@ -42,6 +46,8 @@ import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -81,11 +87,21 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.R
+import androidx.compose.material.icons.filled.HomeWork
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.People
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.style.TextAlign
+import com.example.model.BookingStatus
+import com.example.viewmodel.Currency
+import com.example.model.ListingPurpose
+import com.example.model.NotificationType
 import com.example.model.Property
 import com.example.model.PropertyType
 import com.example.model.allPhotoItems
 import com.example.ui.components.AuthBottomSheet
 import com.example.ui.components.AuthMode
+import com.example.ui.components.HostNotificationsDialog
 import com.example.ui.components.ManagePropertyPhotosDialog
 import com.example.ui.components.PropertyImageView
 import com.example.ui.theme.MobiCoralPrimary
@@ -101,21 +117,116 @@ fun HostScreen(
     modifier: Modifier = Modifier
 ) {
     val allProperties by viewModel.allProperties.collectAsStateWithLifecycle()
+    val userProperties by viewModel.userProperties.collectAsStateWithLifecycle()
+    val allBookings by viewModel.allBookings.collectAsStateWithLifecycle()
+    val isRefreshingUserListings by viewModel.isRefreshingUserListings.collectAsStateWithLifecycle()
     val currency by viewModel.currency.collectAsStateWithLifecycle()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
+    val hostNotifications by viewModel.hostNotifications.collectAsStateWithLifecycle()
+    val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
 
     var showAuthSheet by remember { mutableStateOf(false) }
     var showCreateListingDialog by remember { mutableStateOf(false) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
     var propertyForPhotoManagement by remember { mutableStateOf<Property?>(null) }
     var propertyToEdit by remember { mutableStateOf<Property?>(null) }
     var propertyToDelete by remember { mutableStateOf<Property?>(null) }
 
     var selectedHostFilter by remember { mutableStateOf(0) } // 0: My Hosted Listings, 1: All Network Listings
 
-    val myHostedProperties = remember(allProperties, currentUser) {
-        allProperties.filter { viewModel.isHostOf(it) }
+    // Requirement 2: On dashboard load, fetch listings with query (where("userId", "==", currentUser.uid))
+    androidx.compose.runtime.LaunchedEffect(currentUser?.uid) {
+        if (currentUser != null) {
+            viewModel.fetchHostListings()
+        }
     }
+
+    val myHostedProperties = userProperties
     val displayedProperties = if (selectedHostFilter == 0) myHostedProperties else allProperties
+
+    // Filter real host bookings for user's properties
+    val hostPropertyIds = remember(myHostedProperties) {
+        myHostedProperties.map { it.id }.toSet()
+    }
+    val hostBookings = remember(allBookings, hostPropertyIds) {
+        allBookings.filter { booking ->
+            hostPropertyIds.contains(booking.propertyId) && booking.status != BookingStatus.CANCELLED
+        }
+    }
+
+    // 1. Total Earnings: 0 for new user, or sum of real host bookings / rent * occupancy. If 0, show "Ksh 0" / "$ 0"
+    val totalEarnings = remember(myHostedProperties, hostBookings) {
+        if (myHostedProperties.isEmpty()) {
+            0
+        } else {
+            hostBookings.sumOf { it.totalAmount }
+        }
+    }
+    val earningsDisplay = if (totalEarnings == 0) "${currency.symbol} 0" else currency.format(totalEarnings)
+
+    // 2. Occupancy Rate: 0% if no properties
+    val occupancyDisplay = remember(myHostedProperties, hostBookings) {
+        if (myHostedProperties.isEmpty() || hostBookings.isEmpty()) {
+            "0%"
+        } else {
+            val bookedNights = hostBookings.sumOf { it.nightsCount }
+            val totalCapacityDays = myHostedProperties.size * 30
+            val rate = ((bookedNights.toDouble() / totalCapacityDays.coerceAtLeast(1)) * 100.0).coerceIn(0.0, 100.0)
+            String.format(java.util.Locale.US, "%.1f%%", rate)
+        }
+    }
+
+    // 3. Average Rating: 0 or "No ratings yet" if no properties or no reviews
+    val ratingDisplay = remember(myHostedProperties) {
+        if (myHostedProperties.isEmpty()) {
+            "No ratings yet"
+        } else {
+            val ratedProps = myHostedProperties.filter { it.reviewCount > 0 && it.rating > 0.0 }
+            if (ratedProps.isEmpty()) {
+                "No ratings yet"
+            } else {
+                val avg = ratedProps.map { it.rating }.average()
+                String.format(java.util.Locale.US, "%.2f ★", avg)
+            }
+        }
+    }
+
+    // 4. Total Tenants: 0 for new user
+    val totalTenants = remember(myHostedProperties, hostBookings) {
+        if (myHostedProperties.isEmpty()) {
+            0
+        } else {
+            hostBookings.sumOf { it.guestsCount }
+        }
+    }
+    val tenantsDisplay = "$totalTenants"
+
+    // 5. Dynamic Monthly Performance points for charts computed from real Firestore/booking data
+    val monthlyPerformancePoints = remember(hostBookings) {
+        val monthNames = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        (5 downTo 0).map { offset ->
+            val cal = java.util.Calendar.getInstance().apply {
+                timeInMillis = System.currentTimeMillis()
+                add(java.util.Calendar.MONTH, -offset)
+            }
+            val mIdx = cal.get(java.util.Calendar.MONTH)
+            val yr = cal.get(java.util.Calendar.YEAR)
+            val label = monthNames[mIdx]
+
+            val matchingBookings = hostBookings.filter { booking ->
+                val bCal = java.util.Calendar.getInstance().apply {
+                    timeInMillis = booking.createdTimestamp
+                }
+                bCal.get(java.util.Calendar.MONTH) == mIdx && bCal.get(java.util.Calendar.YEAR) == yr
+            }
+
+            MonthlyPerformancePoint(
+                monthName = label,
+                revenue = matchingBookings.sumOf { it.totalAmount },
+                bookingsCount = matchingBookings.size
+            )
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -128,6 +239,31 @@ fun HostScreen(
                     )
                 },
                 actions = {
+                    BadgedBox(
+                        badge = {
+                            if (unreadNotificationCount > 0) {
+                                Badge(
+                                    containerColor = MobiCoralPrimary,
+                                    contentColor = Color.White
+                                ) {
+                                    Text("$unreadNotificationCount")
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(end = 4.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showNotificationsDialog = true },
+                            modifier = Modifier.testTag("host_notifications_button")
+                        ) {
+                            Icon(
+                                imageVector = if (unreadNotificationCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
+                                contentDescription = "Host Alerts",
+                                tint = if (unreadNotificationCount > 0) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
                     Button(
                         onClick = {
                             if (currentUser == null) {
@@ -245,35 +381,221 @@ fun HostScreen(
                 }
             }
 
-            // Host Performance & Earnings Grid
+            // Host Performance & Earnings Grid (Dynamic from Firestore)
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        HostStatCard(
+                            title = "Total Earnings",
+                            value = earningsDisplay,
+                            icon = Icons.Default.AttachMoney,
+                            iconTint = MobiEmerald,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("host_stat_earnings")
+                        )
+
+                        HostStatCard(
+                            title = "Occupancy Rate",
+                            value = occupancyDisplay,
+                            icon = Icons.Default.TrendingUp,
+                            iconTint = MobiCoralPrimary,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("host_stat_occupancy")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        HostStatCard(
+                            title = "Total Tenants",
+                            value = tenantsDisplay,
+                            icon = Icons.Default.People,
+                            iconTint = Color(0xFF1976D2),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("host_stat_tenants")
+                        )
+
+                        HostStatCard(
+                            title = "Average Rating",
+                            value = ratingDisplay,
+                            icon = Icons.Default.Star,
+                            iconTint = MobiGoldRating,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("host_stat_rating")
+                        )
+                    }
+                }
+            }
+
+            // Real Firestore Analytics Bar Chart
+            item {
+                HostRevenueAnalyticsCard(
+                    currency = currency,
+                    monthlyData = monthlyPerformancePoints,
+                    totalEarnings = totalEarnings,
+                    totalBookings = hostBookings.size
+                )
+            }
+
+            // Host Activity & Notifications Section
+            item {
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (unreadNotificationCount > 0)
+                            MobiCoralPrimary.copy(alpha = 0.08f)
+                        else
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (unreadNotificationCount > 0) MobiCoralPrimary.copy(alpha = 0.35f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("host_alerts_summary_card")
                 ) {
-                    HostStatCard(
-                        title = "2026 Earnings",
-                        value = currency.format(14850),
-                        icon = Icons.Default.AttachMoney,
-                        iconTint = MobiEmerald,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (unreadNotificationCount > 0) MobiCoralPrimary.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (unreadNotificationCount > 0) Icons.Default.NotificationsActive else Icons.Default.Notifications,
+                                            contentDescription = null,
+                                            tint = if (unreadNotificationCount > 0) MobiCoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
 
-                    HostStatCard(
-                        title = "Occupancy Rate",
-                        value = "94.8%",
-                        icon = Icons.Default.TrendingUp,
-                        iconTint = MobiCoralPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
+                                Column {
+                                    Text(
+                                        text = "Listing Alerts & Activity",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp
+                                    )
+                                    Text(
+                                        text = if (unreadNotificationCount > 0)
+                                            "$unreadNotificationCount new alert(s) for your properties"
+                                        else if (hostNotifications.isNotEmpty())
+                                            "${hostNotifications.size} total activity record(s)"
+                                        else
+                                            "Instant notifications enabled for bookings & likes",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
-                    HostStatCard(
-                        title = "Overall Rating",
-                        value = "4.99 ★",
-                        icon = Icons.Default.Star,
-                        iconTint = MobiGoldRating,
-                        modifier = Modifier.weight(1f)
-                    )
+                            TextButton(
+                                onClick = { showNotificationsDialog = true },
+                                modifier = Modifier.testTag("view_all_notifications_button")
+                            ) {
+                                Text(
+                                    text = if (hostNotifications.isNotEmpty()) "See All (${hostNotifications.size})" else "Inbox",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MobiCoralPrimary
+                                )
+                            }
+                        }
+
+                        if (hostNotifications.isNotEmpty()) {
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f),
+                                thickness = 0.8.dp
+                            )
+
+                            // Show the latest 2 notifications
+                            hostNotifications.take(2).forEach { notif ->
+                                val isBooking = notif.type == NotificationType.BOOKING
+                                val accent = if (isBooking) MobiEmerald else MobiCoralPrimary
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
+                                        .clickable {
+                                            viewModel.markNotificationAsRead(notif.id)
+                                            showNotificationsDialog = true
+                                        }
+                                        .padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = accent.copy(alpha = 0.12f),
+                                        modifier = Modifier.size(30.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = if (isBooking) Icons.Default.BookmarkAdded else Icons.Default.Favorite,
+                                                contentDescription = null,
+                                                tint = accent,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(10.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = notif.title,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                maxLines = 1
+                                            )
+                                            if (!notif.isRead) {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MobiCoralPrimary,
+                                                    modifier = Modifier.size(7.dp)
+                                                ) {}
+                                            }
+                                        }
+                                        Text(
+                                            text = notif.message,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -334,8 +656,82 @@ fun HostScreen(
                 }
             }
 
-            // Property Cards
-            items(displayedProperties, key = { it.id }) { prop ->
+            // Requirement 3: If empty, show "No properties yet - Add your first property" empty state.
+            if (displayedProperties.isEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .testTag("host_empty_properties_card")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(28.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MobiCoralPrimary.copy(alpha = 0.12f),
+                                modifier = Modifier.size(72.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.HomeWork,
+                                        contentDescription = null,
+                                        tint = MobiCoralPrimary,
+                                        modifier = Modifier.size(36.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "No properties yet - Add your first property",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "Your properties are fetched live from Firestore where userId matches your account. Add your first listing to start hosting!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            Button(
+                                onClick = {
+                                    if (currentUser == null) {
+                                        showAuthSheet = true
+                                    } else {
+                                        showCreateListingDialog = true
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                modifier = Modifier.testTag("add_first_property_btn")
+                            ) {
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Add Your First Property", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Property Cards
+                items(displayedProperties, key = { it.id }) { prop ->
                 val photos = prop.allPhotoItems()
                 val isHost = viewModel.isHostOf(prop)
 
@@ -416,11 +812,36 @@ fun HostScreen(
                                     }
                                 }
 
-                                Text(
-                                    text = "${prop.city}, ${prop.country} · ${prop.propertyType.displayName}",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "${prop.city}, ${prop.country} · ${prop.propertyType.displayName}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = when (prop.listingPurpose) {
+                                            ListingPurpose.FOR_SALE -> Color(0xFF388E3C).copy(alpha = 0.12f)
+                                            ListingPurpose.FOR_RENT -> Color(0xFF1976D2).copy(alpha = 0.12f)
+                                            ListingPurpose.BNB_STAY -> MobiCoralPrimary.copy(alpha = 0.12f)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = prop.listingPurpose.displayName,
+                                            color = when (prop.listingPurpose) {
+                                                ListingPurpose.FOR_SALE -> Color(0xFF2E7D32)
+                                                ListingPurpose.FOR_RENT -> Color(0xFF1565C0)
+                                                ListingPurpose.BNB_STAY -> MobiCoralPrimary
+                                            },
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp)
+                                        )
+                                    }
+                                }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -428,7 +849,7 @@ fun HostScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "${currency.format(prop.pricePerNight)} / night",
+                                        text = "${currency.format(prop.pricePerNight)} ${prop.priceSuffix}",
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 14.sp,
                                         color = MaterialTheme.colorScheme.onSurface
@@ -507,19 +928,17 @@ fun HostScreen(
                                         )
                                     }
 
-                                    // Delete listing option for custom listings
-                                    if (prop.id.startsWith("custom-")) {
-                                        IconButton(
-                                            onClick = { propertyToDelete = prop },
-                                            modifier = Modifier.size(32.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Delete,
-                                                contentDescription = "Delete Listing",
-                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
+                                    // Delete listing option for host properties
+                                    IconButton(
+                                        onClick = { propertyToDelete = prop },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Listing",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
                                 } else {
                                     // For non-owned properties
@@ -537,6 +956,7 @@ fun HostScreen(
                         }
                     }
                 }
+            }
             }
         }
     }
@@ -582,6 +1002,14 @@ fun HostScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Host Notifications Modal Dialog
+    if (showNotificationsDialog) {
+        HostNotificationsDialog(
+            viewModel = viewModel,
+            onDismiss = { showNotificationsDialog = false }
         )
     }
 
@@ -635,6 +1063,169 @@ fun HostStatCard(
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+data class MonthlyPerformancePoint(
+    val monthName: String,
+    val revenue: Int,
+    val bookingsCount: Int
+)
+
+@Composable
+fun HostRevenueAnalyticsCard(
+    currency: Currency,
+    monthlyData: List<MonthlyPerformancePoint>,
+    totalEarnings: Int,
+    totalBookings: Int,
+    modifier: Modifier = Modifier
+) {
+    val maxRevenue = remember(monthlyData) {
+        monthlyData.maxOfOrNull { it.revenue }?.coerceAtLeast(1) ?: 1
+    }
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("host_revenue_analytics_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Revenue & Booking Trends",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Computed live from Firestore bookings",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MobiEmerald.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = if (totalEarnings > 0) "Active" else "0 Ksh Real Baseline",
+                        color = MobiEmerald,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (totalEarnings == 0 && totalBookings == 0) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MobiCoralPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "New Host Account: 0 bookings & 0 earnings recorded. Live chart bars update automatically as guests reserve your properties.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                    }
+                }
+            }
+
+            // Monthly performance bars
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(130.dp)
+                    .padding(top = 8.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                monthlyData.forEach { point ->
+                    val heightFraction = if (maxRevenue > 0 && point.revenue > 0) {
+                        (point.revenue.toFloat() / maxRevenue.toFloat()).coerceIn(0.12f, 1f)
+                    } else {
+                        0.04f
+                    }
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        if (point.revenue > 0) {
+                            Text(
+                                text = currency.format(point.revenue),
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MobiEmerald,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .width(22.dp)
+                                .height((80 * heightFraction).dp)
+                                .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                                .background(
+                                    if (point.revenue > 0) {
+                                        Brush.verticalGradient(
+                                            listOf(MobiCoralPrimary, MobiEmerald)
+                                        )
+                                    } else {
+                                        Brush.verticalGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                            )
+                                        )
+                                    }
+                                )
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Text(
+                            text = point.monthName,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -752,6 +1343,7 @@ fun CreateListingDialog(
     val currency by viewModel.currency.collectAsStateWithLifecycle()
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
+    var selectedPurpose by remember { mutableStateOf(ListingPurpose.BNB_STAY) }
     var selectedType by remember { mutableStateOf(PropertyType.ENTIRE_VILLA) }
     var city by remember { mutableStateOf("") }
     var country by remember { mutableStateOf("") }
@@ -761,7 +1353,7 @@ fun CreateListingDialog(
     var beds by remember { mutableIntStateOf(3) }
     var bathrooms by remember { mutableIntStateOf(2) }
     var maxGuests by remember { mutableIntStateOf(4) }
-    var hostName by remember { mutableStateOf(currentUser?.displayName ?: "Alexander Wright") }
+    var hostName by remember { mutableStateOf(currentUser?.displayName ?: "") }
     var hostBio by remember { mutableStateOf("Passionate host welcoming worldwide guests to our curated home.") }
     var selectedImageRes by remember { mutableIntStateOf(R.drawable.img_hero_banner) }
     var selectedPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -793,11 +1385,68 @@ fun CreateListingDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Listing Purpose Selector
+                Text(
+                    text = "Listing Purpose",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ListingPurpose.values().forEach { purpose ->
+                        FilterChip(
+                            selected = selectedPurpose == purpose,
+                            onClick = { selectedPurpose = purpose },
+                            label = { Text(purpose.displayName, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MobiCoralPrimary.copy(alpha = 0.15f),
+                                selectedLabelColor = MobiCoralPrimary
+                            )
+                        )
+                    }
+                }
+
+                // Property Category / Type Selector
+                Text(
+                    text = "Property Type",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val types = listOf(
+                        PropertyType.ENTIRE_VILLA,
+                        PropertyType.APARTMENT,
+                        PropertyType.OFFICE,
+                        PropertyType.COMMERCIAL_SPACE,
+                        PropertyType.CABIN
+                    )
+                    types.forEach { type ->
+                        FilterChip(
+                            selected = selectedType == type,
+                            onClick = { selectedType = type },
+                            label = { Text(type.displayName, fontSize = 10.sp) }
+                        )
+                    }
+                }
+
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Property Title") },
-                    placeholder = { Text("e.g. Modern Sunset Cliff Villa") },
+                    placeholder = {
+                        Text(
+                            when (selectedPurpose) {
+                                ListingPurpose.FOR_SALE -> "e.g. Modern Sunset Cliff Villa (For Sale)"
+                                ListingPurpose.FOR_RENT -> "e.g. Executive Corporate Office Floor"
+                                ListingPurpose.BNB_STAY -> "e.g. Modern Sunset Cliff Villa"
+                            }
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -806,7 +1455,7 @@ fun CreateListingDialog(
                     value = city,
                     onValueChange = { city = it },
                     label = { Text("City / Region") },
-                    placeholder = { Text("e.g. Bali, Lake Como") },
+                    placeholder = { Text("e.g. Bali, Lake Como, Manhattan") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -815,7 +1464,7 @@ fun CreateListingDialog(
                     value = country,
                     onValueChange = { country = it },
                     label = { Text("Country") },
-                    placeholder = { Text("e.g. Indonesia, Italy") },
+                    placeholder = { Text("e.g. Indonesia, Italy, USA") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -823,7 +1472,15 @@ fun CreateListingDialog(
                 OutlinedTextField(
                     value = pricePerNight,
                     onValueChange = { pricePerNight = it },
-                    label = { Text("Price per Night (${currency.code})") },
+                    label = {
+                        Text(
+                            when (selectedPurpose) {
+                                ListingPurpose.FOR_SALE -> "Total Sale Price (${currency.code})"
+                                ListingPurpose.FOR_RENT -> "Monthly Rent / Lease (${currency.code})"
+                                ListingPurpose.BNB_STAY -> "Price per Night (${currency.code})"
+                            }
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -951,6 +1608,7 @@ fun CreateListingDialog(
                             hostName = hostName,
                             hostBio = hostBio,
                             imageResId = selectedImageRes,
+                            listingPurpose = selectedPurpose,
                             initialPhotoUris = selectedPhotoUris
                         )
                         onDismiss()

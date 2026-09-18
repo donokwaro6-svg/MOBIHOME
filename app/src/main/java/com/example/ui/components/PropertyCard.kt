@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.model.ListingPurpose
 import com.example.model.Property
 import com.example.model.allPhotoItems
 import com.example.ui.theme.MobiCoralPrimary
@@ -89,13 +90,32 @@ fun PropertyCard(
                 modifier = Modifier.fillMaxSize()
             )
 
-            // Top Badges (Guest Favorite / Rare Find)
+            // Top Badges (Purpose & Guest Favorite / Superhost)
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(12.dp),
+                    .padding(10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                // Purpose Badge
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = when (property.listingPurpose) {
+                        ListingPurpose.FOR_SALE -> Color(0xFF0D47A1)
+                        ListingPurpose.FOR_RENT -> Color(0xFF1B5E20)
+                        ListingPurpose.BNB_STAY -> MobiCoralPrimary
+                    },
+                    shadowElevation = 3.dp
+                ) {
+                    Text(
+                        text = property.listingPurpose.displayName,
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                    )
+                }
+
                 if (property.isGuestFavorite) {
                     Surface(
                         shape = RoundedCornerShape(20.dp),
@@ -105,9 +125,9 @@ fun PropertyCard(
                         Text(
                             text = "Guest favorite",
                             color = Color(0xFF222222),
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                         )
                     }
                 } else if (property.isSuperhost) {
@@ -119,9 +139,9 @@ fun PropertyCard(
                         Text(
                             text = "Superhost",
                             color = Color.White,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
                         )
                     }
                 }
@@ -198,15 +218,22 @@ fun PropertyCard(
             overflow = TextOverflow.Ellipsis
         )
 
+        val specsText = if (property.isOfficeOrCommercial) {
+            val parkingText = if (property.parkingSpaces > 0) " · ${property.parkingSpaces} parking slots" else ""
+            "${property.squareFeet} sq ft · ${property.zoningType}$parkingText"
+        } else {
+            "${property.bedroomCount} beds · ${property.bathroomCount} baths · ${property.squareFeet} sq ft"
+        }
+
         Text(
-            text = "${property.bedroomCount} bedrooms · ${property.bedCount} beds · ${property.bathroomCount} baths",
+            text = specsText,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
         )
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Price per night
+        // Price formatting with purpose suffix
         Row(
             verticalAlignment = Alignment.Bottom
         ) {
@@ -217,7 +244,7 @@ fun PropertyCard(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = " night",
+                text = property.priceSuffix,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 2.dp)

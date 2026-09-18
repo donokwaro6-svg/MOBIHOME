@@ -610,7 +610,7 @@ fun ManagePropertyPhotosDialog(
                                             shape = RoundedCornerShape(4.dp)
                                         ) {
                                             Text(
-                                                text = "Firebase Storage",
+                                                text = "Cloud Photo",
                                                 color = MobiEmerald,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,

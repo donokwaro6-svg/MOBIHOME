@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.model.BookingReservation
+import com.example.model.ListingPurpose
 import com.example.model.Property
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
@@ -90,30 +91,35 @@ fun BookingScreen(
     var showSuccessDialog by remember { mutableStateOf(false) }
     var confirmedReservation by remember { mutableStateOf<BookingReservation?>(null) }
 
-    // Price calculations
-    val nights = draft.nightsCount.coerceAtLeast(1)
-    val basePrice = property.pricePerNight * nights
-    val cleaning = property.cleaningFee
+    val isSale = property.isForSale
+    val isRent = property.isForRent
+
+    // Price calculations tailored to ListingPurpose
+    val nights = if (isSale) 1 else draft.nightsCount.coerceAtLeast(1)
+    val basePrice = if (isSale) {
+        (property.pricePerNight * 0.01).toInt().coerceAtLeast(1000)
+    } else {
+        property.pricePerNight * nights
+    }
+    val cleaning = if (isSale) 0 else property.cleaningFee
     val serviceFee = (basePrice * property.serviceFeeRate).toInt()
     val taxes = (basePrice * property.taxesRate).toInt()
     val subtotal = basePrice + cleaning + serviceFee + taxes
     val discount = if (useCredits) creditsBalance.coerceAtMost(subtotal) else 0
     val finalTotalUsd = (subtotal - discount).coerceAtLeast(0)
 
-    val convertedNightly = (property.pricePerNight * currency.rateFromUsd).toInt()
-    val convertedBase = (basePrice * currency.rateFromUsd).toInt()
-    val convertedCleaning = (cleaning * currency.rateFromUsd).toInt()
-    val convertedService = (serviceFee * currency.rateFromUsd).toInt()
-    val convertedTaxes = (taxes * currency.rateFromUsd).toInt()
-    val convertedDiscount = (discount * currency.rateFromUsd).toInt()
-    val convertedFinalTotal = (finalTotalUsd * currency.rateFromUsd).toInt()
+    val screenTitle = when {
+        isSale -> "Purchase Confirmation & Escrow"
+        isRent -> "Lease Booking & Confirmation"
+        else -> "Confirm and pay"
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        text = "Confirm and pay",
+                        text = screenTitle,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold
                     )
@@ -159,6 +165,12 @@ fun BookingScreen(
                         )
                     }
 
+                    val buttonText = when {
+                        isSale -> "Place Escrow & Confirm"
+                        isRent -> "Confirm Lease"
+                        else -> "Confirm & Pay"
+                    }
+
                     Button(
                         onClick = {
                             val reservation = viewModel.confirmBooking(property)
@@ -170,7 +182,7 @@ fun BookingScreen(
                             .testTag("confirm_and_pay_button"),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 28.dp)
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Lock,
@@ -180,9 +192,9 @@ fun BookingScreen(
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "Confirm & Pay",
+                            text = buttonText,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             color = Color.White
                         )
                     }
@@ -421,27 +433,63 @@ fun BookingScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "Price details",
+                        text = if (isSale) "Purchase & Escrow details" else if (isRent) "Lease details" else "Price details",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
 
-                    PriceRow(
-                        label = "${currency.format(property.pricePerNight)} x $nights nights",
-                        value = currency.format(basePrice)
-                    )
-                    PriceRow(
-                        label = "Cleaning fee",
-                        value = currency.format(cleaning)
-                    )
-                    PriceRow(
-                        label = "MobiHome service fee (12%)",
-                        value = currency.format(serviceFee)
-                    )
-                    PriceRow(
-                        label = "Taxes & Occupancy fees (8%)",
-                        value = currency.format(taxes)
-                    )
+                    if (isSale) {
+                        PriceRow(
+                            label = "Listed Sale Price",
+                            value = currency.format(property.pricePerNight)
+                        )
+                        PriceRow(
+                            label = "Earnest Escrow Deposit (1%)",
+                            value = currency.format(basePrice)
+                        )
+                        PriceRow(
+                            label = "Title & Legal Escrow Fee (12%)",
+                            value = currency.format(serviceFee)
+                        )
+                        PriceRow(
+                            label = "Stamp Duty & Registration Taxes (8%)",
+                            value = currency.format(taxes)
+                        )
+                    } else if (isRent) {
+                        PriceRow(
+                            label = "Monthly Lease Rate",
+                            value = currency.format(property.pricePerNight)
+                        )
+                        PriceRow(
+                            label = "Security Holding Deposit (1 mo)",
+                            value = currency.format(basePrice)
+                        )
+                        PriceRow(
+                            label = "Lease Processing & Background Verification",
+                            value = currency.format(serviceFee)
+                        )
+                        PriceRow(
+                            label = "Municipal Lease Tax & Surcharge (8%)",
+                            value = currency.format(taxes)
+                        )
+                    } else {
+                        PriceRow(
+                            label = "${currency.format(property.pricePerNight)} x $nights nights",
+                            value = currency.format(basePrice)
+                        )
+                        PriceRow(
+                            label = "Cleaning fee",
+                            value = currency.format(cleaning)
+                        )
+                        PriceRow(
+                            label = "MobiHome service fee (12%)",
+                            value = currency.format(serviceFee)
+                        )
+                        PriceRow(
+                            label = "Taxes & Occupancy fees (8%)",
+                            value = currency.format(taxes)
+                        )
+                    }
 
                     // MobiHome Credits Discount Toggle
                     Surface(
@@ -531,26 +579,33 @@ fun BookingScreen(
     // Celebratory Success Confirmation Dialog
     if (showSuccessDialog && confirmedReservation != null) {
         AlertDialog(
-            onDismissRequest = {},
+            onDismissRequest = {
+                showSuccessDialog = false
+                onBookingSuccess()
+            },
             icon = {
                 Surface(
                     shape = CircleShape,
-                    color = MobiCoralPrimary,
-                    modifier = Modifier.size(60.dp)
+                    color = MobiEmerald,
+                    modifier = Modifier.size(64.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(36.dp)
                         )
                     }
                 }
             },
             title = {
                 Text(
-                    text = "Reservation Confirmed!",
+                    text = when {
+                        isSale -> "Purchase Escrow Confirmed!"
+                        isRent -> "Lease Booking Confirmed!"
+                        else -> "Booking Confirmed!"
+                    },
                     fontWeight = FontWeight.Bold,
                     fontSize = 20.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -559,7 +614,7 @@ fun BookingScreen(
             text = {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
                         text = "You're all set for ${property.title}!",
@@ -568,20 +623,107 @@ fun BookingScreen(
                     )
 
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = "Booking Code: ${confirmedReservation?.bookingReference}",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Confirmation Code",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = confirmedReservation?.bookingReference ?: "",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    color = MobiCoralPrimary
+                                )
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Category",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "${property.propertyType.displayName} · ${property.listingPurpose.displayName}",
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (isSale) "Escrow Placed" else "Total Paid",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = currency.format(finalTotalUsd),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = if (isSale) "Effective Date" else "Check-in",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = draft.checkInDate,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+
+                    // Host Notification Alert Notice
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MobiEmerald.copy(alpha = 0.12f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MobiEmerald,
+                                modifier = Modifier.size(18.dp)
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Check-in: ${draft.checkInDate}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "Host ${property.host.name} was notified of your booking!",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MobiEmerald
                             )
                         }
                     }
@@ -598,6 +740,16 @@ fun BookingScreen(
                     modifier = Modifier.testTag("go_to_trips_button")
                 ) {
                     Text("View in My Trips", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showSuccessDialog = false
+                        onBookingSuccess()
+                    }
+                ) {
+                    Text("Done")
                 }
             }
         )

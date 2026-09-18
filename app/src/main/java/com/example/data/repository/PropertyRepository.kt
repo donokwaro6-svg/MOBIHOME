@@ -1,32 +1,37 @@
 package com.example.data.repository
 
+import android.content.Context
+import android.net.Uri
 import com.example.data.firebase.FirebasePhotoService
+import com.example.data.firebase.FirestorePropertyService
 import com.example.data.local.BookingDao
 import com.example.data.local.BookingEntity
-import com.example.data.local.CustomListingDao
-import com.example.data.local.CustomListingEntity
-import com.example.data.local.PropertyPhotoDao
+import com.example.data.local.HostNotificationDao
+import com.example.data.local.HostNotificationEntity
 import com.example.data.local.WishlistDao
 import com.example.data.local.WishlistEntity
-import com.example.model.Amenity
-import com.example.model.AmenityIcon
 import com.example.model.BookingReservation
 import com.example.model.BookingStatus
-import com.example.model.Host
+import com.example.model.HostNotification
+import com.example.model.ListingPurpose
+import com.example.model.NotificationType
 import com.example.model.Property
 import com.example.model.PropertyPhoto
 import com.example.model.PropertyType
 import com.example.model.allPhotoItems
-import android.net.Uri
+import com.example.util.HostNotificationManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import java.util.UUID
 
 class PropertyRepository(
+    private val context: Context,
     private val wishlistDao: WishlistDao,
     private val bookingDao: BookingDao,
-    private val customListingDao: CustomListingDao,
-    val firebasePhotoService: FirebasePhotoService
+    private val hostNotificationDao: HostNotificationDao,
+    val firebasePhotoService: FirebasePhotoService,
+    val firestorePropertyService: FirestorePropertyService
 ) {
 
     val wishlistedIds: Flow<Set<String>> = wishlistDao.getAllWishlist().map { list ->
@@ -35,73 +40,51 @@ class PropertyRepository(
 
     val allPhotosFlow: Flow<List<PropertyPhoto>> = firebasePhotoService.allPhotosFlow
 
-    val customListings: Flow<List<Property>> = combine(
-        customListingDao.getAllCustomListings(),
+    // Real-time flow of all Firestore properties
+    val firestorePropertiesFlow: Flow<List<Property>> = firestorePropertyService.fetchAllPropertiesFlow()
+
+    // Requirement 2: Fetch user listings with query where("userId", "==", currentUser.uid)
+    fun getUserListingsFlow(userId: String): Flow<List<Property>> {
+        return firestorePropertyService.fetchUserListingsFlow(userId)
+    }
+
+    suspend fun fetchUserListingsOnce(userId: String): List<Property> {
+        return firestorePropertyService.fetchUserListingsOnce(userId)
+    }
+
+    // All properties for Explore: Combines Firestore listings with local uploaded photos
+    val allProperties: Flow<List<Property>> = combine(
+        firestorePropertiesFlow,
         allPhotosFlow
-    ) { list, allPhotos ->
+    ) { firestoreProps, allPhotos ->
+        firestoreProps.map { prop ->
+            val additionalPhotos = allPhotos.filter { it.propertyId == prop.id }
+            if (additionalPhotos.isNotEmpty()) {
+                prop.copy(photos = additionalPhotos + prop.allPhotoItems())
+            } else {
+                prop
+            }
+        }
+    }
+
+    val allHostNotifications: Flow<List<HostNotification>> = hostNotificationDao.getAllNotifications().map { list ->
         list.map { entity ->
-            val attachedPhotos = allPhotos.filter { it.propertyId == entity.id }
-            Property(
+            HostNotification(
                 id = entity.id,
+                hostId = entity.hostId,
+                propertyId = entity.propertyId,
+                propertyTitle = entity.propertyTitle,
+                type = runCatching { NotificationType.valueOf(entity.type) }.getOrDefault(NotificationType.BOOKING),
                 title = entity.title,
-                tagline = "Hosted by ${entity.hostName} in ${entity.city}",
-                description = entity.description,
-                propertyType = runCatching { PropertyType.valueOf(entity.propertyType) }.getOrDefault(PropertyType.ENTIRE_VILLA),
-                categoryId = "luxury",
-                city = entity.city,
-                country = entity.country,
-                address = entity.address,
-                latitude = 40.7128,
-                longitude = -74.0060,
-                pricePerNight = entity.pricePerNight,
-                rating = 5.0,
-                reviewCount = 1,
-                isSuperhost = true,
-                isGuestFavorite = true,
-                isRareFind = false,
-                imageResIds = listOf(entity.imageResId),
-                photos = attachedPhotos,
-                bedroomCount = entity.bedrooms,
-                bedCount = entity.beds,
-                bathroomCount = entity.bathrooms,
-                maxGuests = entity.maxGuests,
-                squareFeet = 2200,
-                amenities = listOf(
-                    Amenity("cu1", "Fast WiFi", "Essentials", AmenityIcon.WIFI),
-                    Amenity("cu2", "Chef Kitchen", "Essentials", AmenityIcon.KITCHEN),
-                    Amenity("cu3", "Air Conditioning", "Comfort", AmenityIcon.AC),
-                    Amenity("cu4", "Free Parking", "Features", AmenityIcon.PARKING)
-                ),
-                host = Host(
-                    id = "host-user",
-                    name = entity.hostName,
-                    isSuperhost = true,
-                    rating = 5.0,
-                    reviewsCount = 1,
-                    responseRate = "100%",
-                    responseTime = "within an hour",
-                    joinedYear = 2026,
-                    bio = entity.hostBio
-                ),
-                cleaningFee = 50
+                message = entity.message,
+                guestName = entity.guestName,
+                timestamp = entity.timestamp,
+                isRead = entity.isRead
             )
         }
     }
 
-    val allProperties: Flow<List<Property>> = combine(
-        customListings,
-        allPhotosFlow
-    ) { customProps, allPhotos ->
-        val samplePropsWithPhotos = SampleData.properties.map { sampleProp ->
-            val additionalPhotos = allPhotos.filter { it.propertyId == sampleProp.id }
-            if (additionalPhotos.isNotEmpty()) {
-                sampleProp.copy(photos = additionalPhotos + sampleProp.allPhotoItems())
-            } else {
-                sampleProp
-            }
-        }
-        customProps + samplePropsWithPhotos
-    }
+    val unreadHostNotificationCount: Flow<Int> = hostNotificationDao.getUnreadCount()
 
     fun isWishlisted(propertyId: String): Flow<Boolean> = wishlistDao.isWishlisted(propertyId)
 
@@ -110,6 +93,35 @@ class PropertyRepository(
             wishlistDao.deleteWishlist(propertyId)
         } else {
             wishlistDao.insertWishlist(WishlistEntity(propertyId = propertyId))
+
+            val prop = firestorePropertyService.getPropertyById(propertyId)
+            val propTitle = prop?.title ?: "Your listing"
+            val hostId = prop?.host?.id ?: ""
+            val likeTitle = "❤️ Listing Saved to Wishlist!"
+            val likeMsg = "A prospective guest just saved '$propTitle' to their favorites list."
+            val notifId = UUID.randomUUID().toString()
+
+            hostNotificationDao.insertNotification(
+                HostNotificationEntity(
+                    id = notifId,
+                    hostId = hostId,
+                    propertyId = propertyId,
+                    propertyTitle = propTitle,
+                    type = NotificationType.LIKE.name,
+                    title = likeTitle,
+                    message = likeMsg,
+                    guestName = "A guest",
+                    timestamp = System.currentTimeMillis(),
+                    isRead = false
+                )
+            )
+
+            HostNotificationManager.sendHostAlert(
+                context = context,
+                notificationId = notifId.hashCode(),
+                title = likeTitle,
+                message = likeMsg
+            )
         }
     }
 
@@ -132,7 +144,8 @@ class PropertyRepository(
                 status = runCatching { BookingStatus.valueOf(entity.status) }.getOrDefault(BookingStatus.CONFIRMED),
                 guestName = entity.guestName,
                 specialRequests = entity.specialRequests,
-                createdTimestamp = entity.createdTimestamp
+                createdTimestamp = entity.createdTimestamp,
+                listingPurpose = entity.listingPurpose
             )
         }
     }
@@ -156,8 +169,41 @@ class PropertyRepository(
                 status = booking.status.name,
                 guestName = booking.guestName,
                 specialRequests = booking.specialRequests,
-                createdTimestamp = booking.createdTimestamp
+                createdTimestamp = booking.createdTimestamp,
+                listingPurpose = booking.listingPurpose
             )
+        )
+
+        val matchedProperty = firestorePropertyService.getPropertyById(booking.propertyId)
+        val hostId = matchedProperty?.host?.id ?: ""
+        val notificationTitle = when (booking.listingPurpose) {
+            "FOR_SALE" -> "🎉 Purchase Reservation Confirmed!"
+            "FOR_RENT" -> "🎉 Lease Application Reserved!"
+            else -> "🎉 New Booking Confirmed!"
+        }
+        val notificationMsg = "${booking.guestName} booked ${booking.propertyTitle} (${booking.checkInDate} - ${booking.checkOutDate}). Total: $${booking.totalAmount}. Ref: ${booking.bookingReference}."
+
+        val notifId = UUID.randomUUID().toString()
+        hostNotificationDao.insertNotification(
+            HostNotificationEntity(
+                id = notifId,
+                hostId = hostId,
+                propertyId = booking.propertyId,
+                propertyTitle = booking.propertyTitle,
+                type = NotificationType.BOOKING.name,
+                title = notificationTitle,
+                message = notificationMsg,
+                guestName = booking.guestName,
+                timestamp = System.currentTimeMillis(),
+                isRead = false
+            )
+        )
+
+        HostNotificationManager.sendHostAlert(
+            context = context,
+            notificationId = notifId.hashCode(),
+            title = notificationTitle,
+            message = notificationMsg
         )
     }
 
@@ -165,7 +211,29 @@ class PropertyRepository(
         bookingDao.updateBookingStatus(bookingId, BookingStatus.CANCELLED.name)
     }
 
-    suspend fun addCustomListing(
+    suspend fun markNotificationAsRead(id: String) {
+        hostNotificationDao.markAsRead(id)
+    }
+
+    suspend fun markAllNotificationsAsRead() {
+        hostNotificationDao.markAllAsRead()
+    }
+
+    suspend fun deleteNotification(id: String) {
+        hostNotificationDao.deleteNotification(id)
+    }
+
+    suspend fun clearAllNotifications() {
+        hostNotificationDao.clearAll()
+    }
+
+    /**
+     * Requirement 2: Save all new listings to firestore, not localStorage.
+     * Document has a userId field equal to the owner's auth uid.
+     * Requirement 3: Upload property images to Firebase Storage and save document URL in Firestore.
+     */
+    suspend fun createFirestoreListing(
+        userId: String,
         title: String,
         description: String,
         propertyType: String,
@@ -179,49 +247,33 @@ class PropertyRepository(
         maxGuests: Int,
         hostName: String,
         hostBio: String,
-        imageResId: Int,
-        initialPhotoUris: List<Uri> = emptyList()
+        listingPurpose: String = "BNB_STAY",
+        imageUris: List<Uri> = emptyList(),
+        onProgress: (Float, String) -> Unit = { _, _ -> }
     ): String {
-        val id = "custom-${System.currentTimeMillis()}"
-        customListingDao.insertCustomListing(
-            CustomListingEntity(
-                id = id,
-                title = title,
-                description = description,
-                propertyType = propertyType,
-                city = city,
-                country = country,
-                address = address,
-                pricePerNight = pricePerNight,
-                bedrooms = bedrooms,
-                beds = beds,
-                bathrooms = bathrooms,
-                maxGuests = maxGuests,
-                hostName = hostName,
-                hostBio = hostBio,
-                imageResId = imageResId
-            )
+        return firestorePropertyService.createPropertyListing(
+            userId = userId,
+            title = title,
+            description = description,
+            propertyType = propertyType,
+            city = city,
+            country = country,
+            address = address,
+            pricePerNight = pricePerNight,
+            bedrooms = bedrooms,
+            beds = beds,
+            bathrooms = bathrooms,
+            maxGuests = maxGuests,
+            hostName = hostName,
+            hostBio = hostBio,
+            listingPurpose = listingPurpose,
+            imageUris = imageUris,
+            onProgress = onProgress
         )
-
-        // Upload any initial photos to Firebase
-        for (uri in initialPhotoUris) {
-            runCatching {
-                firebasePhotoService.uploadPhotoFromUri(
-                    propertyId = id,
-                    uri = uri,
-                    caption = "Host Photo - $title"
-                )
-            }
-        }
-        return id
     }
 
-    suspend fun deleteCustomListing(id: String) {
-        customListingDao.deleteListing(id)
-    }
-
-    suspend fun updateCustomListing(
-        id: String,
+    suspend fun updateFirestoreListing(
+        propertyId: String,
         title: String,
         description: String,
         pricePerNight: Int,
@@ -229,8 +281,8 @@ class PropertyRepository(
         country: String,
         address: String
     ) {
-        customListingDao.updateCustomListing(
-            id = id,
+        firestorePropertyService.updateListing(
+            propertyId = propertyId,
             title = title,
             description = description,
             pricePerNight = pricePerNight,
@@ -238,6 +290,10 @@ class PropertyRepository(
             country = country,
             address = address
         )
+    }
+
+    suspend fun deleteFirestoreListing(propertyId: String) {
+        firestorePropertyService.deleteListing(propertyId)
     }
 
     suspend fun uploadPhotoForProperty(
@@ -275,4 +331,3 @@ class PropertyRepository(
         firebasePhotoService.deletePhoto(photoId, propertyId, storagePath)
     }
 }
-

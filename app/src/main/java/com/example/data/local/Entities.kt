@@ -28,28 +28,22 @@ data class BookingEntity(
     val status: String,
     val guestName: String,
     val specialRequests: String,
-    val createdTimestamp: Long = System.currentTimeMillis()
+    val createdTimestamp: Long = System.currentTimeMillis(),
+    val listingPurpose: String = "BNB_STAY"
 )
 
-@Entity(tableName = "custom_listings")
-data class CustomListingEntity(
+@Entity(tableName = "host_notifications")
+data class HostNotificationEntity(
     @PrimaryKey val id: String,
+    val hostId: String,
+    val propertyId: String,
+    val propertyTitle: String,
+    val type: String,
     val title: String,
-    val description: String,
-    val propertyType: String,
-    val city: String,
-    val country: String,
-    val address: String,
-    val pricePerNight: Int,
-    val bedrooms: Int,
-    val beds: Int,
-    val bathrooms: Int,
-    val maxGuests: Int,
-    val hostName: String,
-    val hostBio: String,
-    val imageResId: Int,
-    val isActive: Boolean = true,
-    val createdTimestamp: Long = System.currentTimeMillis()
+    val message: String,
+    val guestName: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
 )
 
 @Entity(tableName = "property_photos")
@@ -65,14 +59,4 @@ data class PropertyPhotoEntity(
     val fileSizeKb: Int = 0
 )
 
-@Entity(tableName = "registered_users")
-data class UserAccountEntity(
-    @PrimaryKey val email: String,
-    val passwordHash: String,
-    val displayName: String,
-    val uid: String,
-    val isSuperhost: Boolean = false,
-    val provider: String = "password",
-    val createdTimestamp: Long = System.currentTimeMillis()
-)
 

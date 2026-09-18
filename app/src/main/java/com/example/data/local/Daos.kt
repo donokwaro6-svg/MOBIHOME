@@ -43,24 +43,6 @@ interface BookingDao {
 }
 
 @Dao
-interface CustomListingDao {
-    @Query("SELECT * FROM custom_listings ORDER BY createdTimestamp DESC")
-    fun getAllCustomListings(): Flow<List<CustomListingEntity>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertCustomListing(listing: CustomListingEntity)
-
-    @Query("UPDATE custom_listings SET title = :title, description = :description, pricePerNight = :pricePerNight, city = :city, country = :country, address = :address WHERE id = :id")
-    suspend fun updateCustomListing(id: String, title: String, description: String, pricePerNight: Int, city: String, country: String, address: String)
-
-    @Query("UPDATE custom_listings SET isActive = :isActive WHERE id = :id")
-    suspend fun updateListingStatus(id: String, isActive: Boolean)
-
-    @Query("DELETE FROM custom_listings WHERE id = :id")
-    suspend fun deleteListing(id: String)
-}
-
-@Dao
 interface PropertyPhotoDao {
     @Query("SELECT * FROM property_photos ORDER BY uploadedAt ASC")
     fun getAllPhotos(): Flow<List<PropertyPhotoEntity>>
@@ -85,20 +67,29 @@ interface PropertyPhotoDao {
 }
 
 @Dao
-interface UserAccountDao {
-    @Query("SELECT * FROM registered_users WHERE LOWER(email) = LOWER(:email) LIMIT 1")
-    suspend fun getUserByEmail(email: String): UserAccountEntity?
+interface HostNotificationDao {
+    @Query("SELECT * FROM host_notifications ORDER BY timestamp DESC")
+    fun getAllNotifications(): Flow<List<HostNotificationEntity>>
 
-    @Query("SELECT * FROM registered_users WHERE uid = :uid LIMIT 1")
-    suspend fun getUserByUid(uid: String): UserAccountEntity?
+    @Query("SELECT * FROM host_notifications WHERE hostId = :hostId ORDER BY timestamp DESC")
+    fun getNotificationsForHost(hostId: String): Flow<List<HostNotificationEntity>>
+
+    @Query("SELECT COUNT(*) FROM host_notifications WHERE isRead = 0")
+    fun getUnreadCount(): Flow<Int>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertUser(user: UserAccountEntity)
+    suspend fun insertNotification(notification: HostNotificationEntity)
 
-    @Query("SELECT COUNT(*) FROM registered_users")
-    suspend fun getUserCount(): Int
+    @Query("UPDATE host_notifications SET isRead = 1 WHERE id = :id")
+    suspend fun markAsRead(id: String)
 
-    @Query("SELECT * FROM registered_users ORDER BY createdTimestamp DESC")
-    suspend fun getAllUsers(): List<UserAccountEntity>
+    @Query("UPDATE host_notifications SET isRead = 1")
+    suspend fun markAllAsRead()
+
+    @Query("DELETE FROM host_notifications WHERE id = :id")
+    suspend fun deleteNotification(id: String)
+
+    @Query("DELETE FROM host_notifications")
+    suspend fun clearAll()
 }
 

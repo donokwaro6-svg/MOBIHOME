@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.model.ListingPurpose
 import com.example.model.Property
 import com.example.ui.components.CategoryBar
 import com.example.viewmodel.Currency
@@ -66,6 +67,8 @@ import com.example.ui.components.SearchHeaderBar
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.viewmodel.MobiHomeViewModel
 import com.example.viewmodel.ViewMode
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 
 @Composable
 fun ExploreScreen(
@@ -105,6 +108,11 @@ fun ExploreScreen(
                     onQueryChange = { viewModel.updateSearchQuery(it) },
                     activeFilterCount = activeFilterCount,
                     onFilterClick = { showFilterSheet = true }
+                )
+
+                PurposeFilterTabs(
+                    selectedPurpose = filterState.selectedPurpose,
+                    onPurposeSelected = { viewModel.selectPurpose(it) }
                 )
 
                 CategoryBar(
@@ -156,7 +164,10 @@ fun ExploreScreen(
                 )
             } else {
                 if (properties.isEmpty()) {
-                    EmptyResultsView(onResetFilters = { viewModel.resetFilters() })
+                    EmptyResultsView(
+                        hasActiveFilters = filterState.query.isNotBlank() || filterState.selectedCategory != "all",
+                        onResetFilters = { viewModel.resetFilters() }
+                    )
                 } else {
                     LazyColumn(
                         modifier = Modifier
@@ -167,14 +178,16 @@ fun ExploreScreen(
                     ) {
                         // Featured Hero Spotlight Banner (shown when no specific search filter is typed)
                         if (filterState.query.isBlank() && filterState.selectedCategory == "all") {
-                            item {
-                                FeaturedSpotlightBanner(
-                                    currency = currency,
-                                    onExploreClick = {
-                                        properties.firstOrNull()?.let { onPropertyClick(it) }
-                                    }
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
+                            val firstProp = properties.firstOrNull()
+                            if (firstProp != null) {
+                                item {
+                                    FeaturedSpotlightBanner(
+                                        property = firstProp,
+                                        currency = currency,
+                                        onExploreClick = { onPropertyClick(firstProp) }
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                }
                             }
                         }
 
@@ -198,6 +211,7 @@ fun ExploreScreen(
             filterState = filterState,
             matchingHomesCount = properties.size,
             currency = currency,
+            onPurposeSelect = { viewModel.selectPurpose(it) },
             onPriceRangeChange = { min, max -> viewModel.setPriceRange(min, max) },
             onPropertyTypeToggle = { viewModel.togglePropertyTypeFilter(it) },
             onAmenityToggle = { viewModel.toggleAmenityFilter(it) },
@@ -212,7 +226,48 @@ fun ExploreScreen(
 }
 
 @Composable
+fun PurposeFilterTabs(
+    selectedPurpose: ListingPurpose?,
+    onPurposeSelected: (ListingPurpose?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val items = listOf(
+        null to "All Types",
+        ListingPurpose.FOR_SALE to "🏡 For Sale",
+        ListingPurpose.FOR_RENT to "🔑 For Rent",
+        ListingPurpose.BNB_STAY to "🏖️ BnB Stays"
+    )
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(items) { (purpose, title) ->
+            val isSelected = selectedPurpose == purpose
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) MobiCoralPrimary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onPurposeSelected(purpose) }
+                    .testTag("purpose_tab_${purpose?.name ?: "all"}")
+            ) {
+                Text(
+                    text = title,
+                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun FeaturedSpotlightBanner(
+    property: Property,
     currency: Currency,
     onExploreClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -231,12 +286,29 @@ fun FeaturedSpotlightBanner(
                 .fillMaxWidth()
                 .aspectRatio(1.8f)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.img_hero_banner),
-                contentDescription = "Featured Luxury Estate",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
+            val photo = property.photos.firstOrNull()
+            if (photo?.urlOrUri != null) {
+                coil.compose.AsyncImage(
+                    model = photo.urlOrUri,
+                    contentDescription = property.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (photo?.resId != null) {
+                Image(
+                    painter = painterResource(id = photo.resId),
+                    contentDescription = property.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = R.drawable.img_hero_banner),
+                    contentDescription = property.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
 
             // Gradient Overlay
             Box(
@@ -273,7 +345,7 @@ fun FeaturedSpotlightBanner(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "MobiHome Luxe Selection",
+                        text = "MobiHome Featured",
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold
@@ -288,13 +360,14 @@ fun FeaturedSpotlightBanner(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "The Azure Horizon Infinity Villa",
+                    text = property.title,
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 18.sp,
+                    maxLines = 1
                 )
                 Text(
-                    text = "Santorini, Greece · Private Heated Infinity Pool",
+                    text = "${property.city}, ${property.country} · ${currency.format(property.pricePerNight)}",
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 13.sp
                 )
@@ -304,7 +377,10 @@ fun FeaturedSpotlightBanner(
 }
 
 @Composable
-fun EmptyResultsView(onResetFilters: () -> Unit) {
+fun EmptyResultsView(
+    hasActiveFilters: Boolean = false,
+    onResetFilters: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -322,28 +398,33 @@ fun EmptyResultsView(onResetFilters: () -> Unit) {
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = "No exact matches found",
+            text = if (hasActiveFilters) "No exact matches found" else "No properties listed yet",
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "Try changing or clearing some of your filters or searching for a different destination.",
+            text = if (hasActiveFilters)
+                "Try changing or clearing some of your search filters."
+            else
+                "There are no properties in the system yet. Be the first to host or list a property on MobiHome!",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Button(
-            onClick = onResetFilters,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary)
-        ) {
-            Text(text = "Reset all filters", fontWeight = FontWeight.Bold)
+        if (hasActiveFilters) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Button(
+                onClick = onResetFilters,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary)
+            ) {
+                Text(text = "Reset all filters", fontWeight = FontWeight.Bold)
+            }
         }
     }
 }

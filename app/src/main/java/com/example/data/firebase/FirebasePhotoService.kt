@@ -8,7 +8,6 @@ import com.example.data.local.PropertyPhotoEntity
 import com.example.model.PropertyPhoto
 import com.google.firebase.FirebaseApp
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -31,7 +30,6 @@ class FirebasePhotoService(
 ) {
     companion object {
         private const val TAG = "FirebasePhotoService"
-        const val STORAGE_BUCKET = "mobihome-app.firebasestorage.app"
         const val FIRESTORE_COLLECTION = "property_photos"
     }
 
@@ -45,15 +43,8 @@ class FirebasePhotoService(
     }
 
     private val firestore: FirebaseFirestore? by lazy {
-        if (isFirebaseAvailable) {
-            runCatching { FirebaseFirestore.getInstance() }.getOrNull()
-        } else null
-    }
-
-    private val storage: FirebaseStorage? by lazy {
-        if (isFirebaseAvailable) {
-            runCatching { FirebaseStorage.getInstance() }.getOrNull()
-        } else null
+        FirebaseConfig.getFirestore(context)
+            ?: if (isFirebaseAvailable) runCatching { FirebaseFirestore.getInstance() }.getOrNull() else null
     }
 
     val allPhotosFlow: Flow<List<PropertyPhoto>> = propertyPhotoDao.getAllPhotos().map { list ->
@@ -100,7 +91,7 @@ class FirebasePhotoService(
         var fileSizeKb = 150
         var localSavedUri = uri.toString()
 
-        onProgress(0.15f, "Preparing photo for upload...")
+        onProgress(0.25f, "Preparing photo for listing...")
 
         // Copy uri to local persistent app storage cache
         try {
@@ -117,29 +108,7 @@ class FirebasePhotoService(
             Log.e(TAG, "Error caching local image: ${e.message}")
         }
 
-        onProgress(0.40f, "Uploading to Firebase Storage (gs://$STORAGE_BUCKET/$storagePath)...")
-
-        var downloadUrl = localSavedUri
-        var isSynced = false
-
-        // Attempt upload to Firebase Storage if available
-        try {
-            storage?.let { firebaseStorage ->
-                val storageRef = firebaseStorage.reference.child(storagePath)
-                val uploadTask = storageRef.putFile(uri)
-                uploadTask.await()
-                val urlTask = storageRef.downloadUrl.await()
-                downloadUrl = urlTask.toString()
-                isSynced = true
-                Log.d(TAG, "Uploaded to Firebase Storage: $downloadUrl")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Firebase Storage upload fallback: ${e.message}")
-            // Fallback keeps local cache and marks as synced for development
-            isSynced = true
-        }
-
-        onProgress(0.80f, "Saving metadata to Firebase Firestore ($FIRESTORE_COLLECTION)...")
+        onProgress(0.60f, "Saving metadata to Firebase Firestore ($FIRESTORE_COLLECTION)...")
 
         // Save metadata record to Firestore
         try {
@@ -147,13 +116,12 @@ class FirebasePhotoService(
                 val photoDoc = hashMapOf(
                     "id" to photoId,
                     "propertyId" to propertyId,
-                    "downloadUrl" to downloadUrl,
+                    "downloadUrl" to localSavedUri,
                     "storagePath" to storagePath,
                     "caption" to caption,
                     "uploadedAt" to System.currentTimeMillis(),
                     "fileSizeKb" to fileSizeKb,
                     "uploader" to "Host",
-                    "storageBucket" to STORAGE_BUCKET,
                     "isSynced" to true
                 )
                 db.collection(FIRESTORE_COLLECTION)
@@ -166,12 +134,12 @@ class FirebasePhotoService(
             Log.w(TAG, "Firestore metadata fallback: ${e.message}")
         }
 
-        onProgress(1.0f, "Photo successfully uploaded and stored in Firebase!")
+        onProgress(1.0f, "Photo synced with Firestore!")
 
         val photoModel = PropertyPhoto(
             id = photoId,
             propertyId = propertyId,
-            urlOrUri = downloadUrl,
+            urlOrUri = localSavedUri,
             resId = null,
             caption = caption.ifBlank { "Host Photo #${(100..999).random()}" },
             uploadedAt = System.currentTimeMillis(),
@@ -208,8 +176,7 @@ class FirebasePhotoService(
         val storagePath = "properties/$propertyId/photos/$photoId.jpg"
         val fileSizeKb = (280..650).random()
 
-        onProgress(0.3f, "Registering photo in Firebase Storage...")
-        onProgress(0.7f, "Recording document in Firestore...")
+        onProgress(0.5f, "Recording document in Firestore...")
 
         // Record in Firestore if active
         try {
@@ -223,7 +190,6 @@ class FirebasePhotoService(
                     "uploadedAt" to System.currentTimeMillis(),
                     "fileSizeKb" to fileSizeKb,
                     "uploader" to "Host",
-                    "storageBucket" to STORAGE_BUCKET,
                     "isSynced" to true
                 )
                 db.collection(FIRESTORE_COLLECTION)
@@ -234,7 +200,7 @@ class FirebasePhotoService(
             Log.w(TAG, "Firestore sync: ${e.message}")
         }
 
-        onProgress(1.0f, "Synced with Firebase!")
+        onProgress(1.0f, "Synced with Firebase Firestore!")
 
         val photoModel = PropertyPhoto(
             id = photoId,
@@ -275,8 +241,7 @@ class FirebasePhotoService(
         val storagePath = "properties/$propertyId/photos/$photoId.jpg"
         val fileSizeKb = 420
 
-        onProgress(0.4f, "Linking image to Firebase Storage...")
-        onProgress(0.8f, "Writing document to Firestore collection ($FIRESTORE_COLLECTION)...")
+        onProgress(0.5f, "Writing document to Firestore collection ($FIRESTORE_COLLECTION)...")
 
         try {
             firestore?.let { db ->
@@ -289,7 +254,6 @@ class FirebasePhotoService(
                     "uploadedAt" to System.currentTimeMillis(),
                     "fileSizeKb" to fileSizeKb,
                     "uploader" to "Host",
-                    "storageBucket" to STORAGE_BUCKET,
                     "isSynced" to true
                 )
                 db.collection(FIRESTORE_COLLECTION)
@@ -300,7 +264,7 @@ class FirebasePhotoService(
             Log.w(TAG, "Firestore sync: ${e.message}")
         }
 
-        onProgress(1.0f, "Synced with Firebase Cloud!")
+        onProgress(1.0f, "Synced with Firebase Firestore!")
 
         val photoModel = PropertyPhoto(
             id = photoId,
@@ -349,15 +313,6 @@ class FirebasePhotoService(
             firestore?.collection(FIRESTORE_COLLECTION)?.document(photoId)?.delete()
         } catch (e: Exception) {
             Log.w(TAG, "Firestore delete: ${e.message}")
-        }
-
-        // Delete from Firebase Storage
-        try {
-            if (storagePath.isNotBlank()) {
-                storage?.reference?.child(storagePath)?.delete()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Storage delete: ${e.message}")
         }
     }
 }

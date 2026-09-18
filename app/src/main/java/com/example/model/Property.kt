@@ -1,40 +1,68 @@
 package com.example.model
 
+enum class ListingPurpose(val displayName: String, val badge: String, val priceSuffix: String) {
+    FOR_SALE("For Sale", "FOR SALE", ""),
+    FOR_RENT("For Rent", "FOR RENT", " / mo"),
+    BNB_STAY("BnB & Staycation", "BNB STAY", " / night")
+}
+
 data class Property(
-    val id: String,
-    val title: String,
-    val tagline: String,
-    val description: String,
-    val propertyType: PropertyType,
-    val categoryId: String,
-    val city: String,
-    val country: String,
-    val address: String,
-    val latitude: Double,
-    val longitude: Double,
-    val pricePerNight: Int,
-    val rating: Double,
-    val reviewCount: Int,
-    val isSuperhost: Boolean,
+    val id: String = "",
+    val title: String = "",
+    val tagline: String = "",
+    val description: String = "",
+    val propertyType: PropertyType = PropertyType.APARTMENT,
+    val listingPurpose: ListingPurpose = ListingPurpose.BNB_STAY,
+    val categoryId: String = "all",
+    val city: String = "",
+    val country: String = "",
+    val address: String = "",
+    val latitude: Double = -1.2921,
+    val longitude: Double = 36.8219,
+    val pricePerNight: Int = 0,
+    val rating: Double = 0.0,
+    val reviewCount: Int = 0,
+    val isSuperhost: Boolean = false,
     val isGuestFavorite: Boolean = true,
     val isRareFind: Boolean = false,
     val imageResIds: List<Int> = emptyList(),
     val photos: List<PropertyPhoto> = emptyList(),
-    val bedroomCount: Int,
-    val bedCount: Int,
-    val bathroomCount: Int,
-    val maxGuests: Int,
-    val squareFeet: Int,
-    val amenities: List<Amenity>,
-    val host: Host,
+    val bedroomCount: Int = 1,
+    val bedCount: Int = 1,
+    val bathroomCount: Int = 1,
+    val maxGuests: Int = 2,
+    val squareFeet: Int = 500,
+    val amenities: List<Amenity> = emptyList(),
+    val host: Host = Host(),
     val sleepingArrangements: List<SleepingArrangement> = emptyList(),
     val cleaningFee: Int = 45,
     val serviceFeeRate: Double = 0.12,
     val taxesRate: Double = 0.08,
-    val reviews: List<Review> = emptyList()
-)
+    val reviews: List<Review> = emptyList(),
+    val parkingSpaces: Int = 2,
+    val zoningType: String = "Residential"
+) {
+    val isForSale: Boolean get() = listingPurpose == ListingPurpose.FOR_SALE
+    val isForRent: Boolean get() = listingPurpose == ListingPurpose.FOR_RENT
+    val isBnBStay: Boolean get() = listingPurpose == ListingPurpose.BNB_STAY
+    val isCommercialOrOffice: Boolean get() = propertyType.isCommercialOrOffice
+    val isOfficeOrCommercial: Boolean get() = propertyType.isCommercialOrOffice
+    val priceSuffix: String get() = listingPurpose.priceSuffix
 
-enum class PropertyType(val displayName: String) {
+    fun priceUnitLabel(): String = when (listingPurpose) {
+        ListingPurpose.FOR_SALE -> " total"
+        ListingPurpose.FOR_RENT -> " / mo"
+        ListingPurpose.BNB_STAY -> " / night"
+    }
+
+    fun actionLabel(): String = when (listingPurpose) {
+        ListingPurpose.FOR_SALE -> "Reserve Purchase"
+        ListingPurpose.FOR_RENT -> "Reserve Lease"
+        ListingPurpose.BNB_STAY -> "Reserve Dates"
+    }
+}
+
+enum class PropertyType(val displayName: String, val isCommercialOrOffice: Boolean = false) {
     ENTIRE_VILLA("Entire villa"),
     CABIN("Entire cabin"),
     PENTHOUSE("Luxury penthouse"),
@@ -42,7 +70,13 @@ enum class PropertyType(val displayName: String) {
     MODERN_LOFT("Modern loft"),
     CHALET("Mountain chalet"),
     TREEHOUSE("Treehouse retreat"),
-    COUNTRYSIDE("Countryside estate")
+    COUNTRYSIDE("Countryside estate"),
+    HOUSE("Single-Family House"),
+    APARTMENT("Apartment & Flat"),
+    BNB("Bed & Breakfast / BnB"),
+    OFFICE("Executive Office Suite", isCommercialOrOffice = true),
+    COMMERCIAL_SPACE("Commercial Retail & Showroom", isCommercialOrOffice = true),
+    WAREHOUSE("Warehouse & Logistics Space", isCommercialOrOffice = true)
 }
 
 data class SleepingArrangement(
@@ -52,16 +86,16 @@ data class SleepingArrangement(
 )
 
 data class Host(
-    val id: String,
-    val name: String,
+    val id: String = "",
+    val name: String = "",
     val avatarResId: Int? = null,
-    val isSuperhost: Boolean,
-    val rating: Double,
-    val reviewsCount: Int,
-    val responseRate: String,
-    val responseTime: String,
-    val joinedYear: Int,
-    val bio: String
+    val isSuperhost: Boolean = false,
+    val rating: Double = 0.0,
+    val reviewsCount: Int = 0,
+    val responseRate: String = "100%",
+    val responseTime: String = "within an hour",
+    val joinedYear: Int = 2024,
+    val bio: String = ""
 )
 
 data class Amenity(
@@ -87,7 +121,10 @@ enum class AmenityIcon {
     GYM,
     PET_FRIENDLY,
     BALCONY,
-    BBQ
+    BBQ,
+    SECURITY,
+    BREAKFAST,
+    ACCESSIBILITY
 }
 
 data class PropertyPhoto(

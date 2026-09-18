@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Accessible
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Balcony
 import androidx.compose.material.icons.filled.Bathtub
@@ -30,6 +31,8 @@ import androidx.compose.material.icons.filled.LocalParking
 import androidx.compose.material.icons.filled.OutdoorGrill
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Pool
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Terrain
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.Work
@@ -121,5 +124,8 @@ private fun getAmenityVector(iconType: AmenityIcon): ImageVector {
         AmenityIcon.PET_FRIENDLY -> Icons.Default.Pets
         AmenityIcon.BALCONY -> Icons.Default.Balcony
         AmenityIcon.BBQ -> Icons.Default.OutdoorGrill
+        AmenityIcon.SECURITY -> Icons.Default.Security
+        AmenityIcon.BREAKFAST -> Icons.Default.Restaurant
+        AmenityIcon.ACCESSIBILITY -> Icons.Default.Accessible
     }
 }
