@@ -81,6 +81,7 @@ import com.example.ui.components.PropertyImageView
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
 import com.example.ui.theme.MobiGoldRating
+import com.example.util.CurrencyUtil
 import com.example.viewmodel.MobiHomeViewModel
 
 @Composable
@@ -124,9 +125,12 @@ fun PropertyDetailScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
+                        val originalFormatted = CurrencyUtil.formatPrice(activeProperty.pricePerNight.toDouble(), activeProperty.currency)
+                        val converted = CurrencyUtil.formatConvertedPrice(activeProperty.pricePerNight.toDouble(), activeProperty.currency, currency.code)
+
                         Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = currency.format(activeProperty.pricePerNight),
+                                text = originalFormatted,
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -138,10 +142,18 @@ fun PropertyDetailScreen(
                                 modifier = Modifier.padding(start = 2.dp)
                             )
                         }
+                        if (converted != null) {
+                            Text(
+                                text = "($converted)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                         val subtitle = when {
-                            activeProperty.isForSale -> "1% Earnest deposit: ${currency.format((activeProperty.pricePerNight * 0.01).toInt().coerceAtLeast(1000))}"
+                            activeProperty.isForSale -> "1% Earnest deposit: ${CurrencyUtil.formatPrice((activeProperty.pricePerNight * 0.01).coerceAtLeast(1000.0), activeProperty.currency)}"
                             activeProperty.isForRent -> "Lease security: 1 mo rent"
-                            else -> "Est. ${currency.format(estimatedTotalUsd)} for 5 nights"
+                            else -> "Est. 5 nights stay"
                         }
                         Text(
                             text = subtitle,

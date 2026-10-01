@@ -4,6 +4,7 @@ import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -81,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.AuthState
+import com.example.model.UserRole
 import com.example.ui.components.GoogleLogoIcon
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
@@ -107,6 +109,7 @@ fun AuthGateScreen(
     var registerPassword by remember { mutableStateOf("") }
     var registerConfirmPassword by remember { mutableStateOf("") }
     var registerPasswordVisible by remember { mutableStateOf(false) }
+    var registerRole by remember { mutableStateOf(UserRole.PROPERTY_SEEKER) }
 
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
     var forgotPasswordEmail by remember { mutableStateOf("") }
@@ -571,8 +574,122 @@ fun AuthGateScreen(
                         text = "Register with your personal email and password to secure your MobiHome account.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
                     )
+
+                    // Two-Role Toggle (Property Seeker vs Property Admin)
+                    Text(
+                        text = "I am joining MobiHome as a:",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                            .testTag("register_role_toggle"),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val isSeeker = registerRole == UserRole.PROPERTY_SEEKER
+                        Card(
+                            onClick = { registerRole = UserRole.PROPERTY_SEEKER },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isSeeker) MobiCoralPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ),
+                            border = BorderStroke(
+                                width = if (isSeeker) 2.dp else 1.dp,
+                                color = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("role_option_seeker")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Property Seeker",
+                                        fontWeight = if (isSeeker) FontWeight.Bold else FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Book stays & request homes",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+
+                        val isAdmin = registerRole == UserRole.PROPERTY_ADMIN
+                        Card(
+                            onClick = { registerRole = UserRole.PROPERTY_ADMIN },
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isAdmin) MobiCoralPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                            ),
+                            border = BorderStroke(
+                                width = if (isAdmin) 2.dp else 1.dp,
+                                color = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("role_option_admin")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 12.dp, horizontal = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.HomeWork,
+                                        contentDescription = null,
+                                        tint = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Property Admin",
+                                        fontWeight = if (isAdmin) FontWeight.Bold else FontWeight.SemiBold,
+                                        fontSize = 13.sp,
+                                        color = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "List properties & manage tenants",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
 
                     // Name Field
                     OutlinedTextField(
@@ -720,7 +837,8 @@ fun AuthGateScreen(
                             viewModel.signUpWithEmail(
                                 registerName.trim(),
                                 registerEmail.trim(),
-                                registerPassword
+                                registerPassword,
+                                role = registerRole
                             ) { success, msg ->
                                 if (!success && msg != null) {
                                     localError = msg

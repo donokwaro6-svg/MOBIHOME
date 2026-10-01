@@ -49,6 +49,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.model.UserRole
 import com.example.ui.screens.AuthGateScreen
 import com.example.ui.screens.BookingScreen
 import com.example.ui.screens.ExploreScreen
@@ -180,8 +181,9 @@ fun MobiHomeApp(
                                 }
                             },
                             label = {
+                                val labelText = if (item == BottomNavItem.Host && currentUser?.role == UserRole.PROPERTY_SEEKER) "Admins" else item.title
                                 Text(
-                                    text = item.title,
+                                    text = labelText,
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                                 )

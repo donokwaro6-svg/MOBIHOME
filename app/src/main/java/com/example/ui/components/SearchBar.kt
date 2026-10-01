@@ -13,10 +13,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Badge
@@ -26,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -36,6 +42,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MobiCoralPrimary
@@ -46,108 +53,212 @@ fun SearchHeaderBar(
     onQueryChange: (String) -> Unit,
     activeFilterCount: Int,
     onFilterClick: () -> Unit,
+    recentSearches: List<String> = emptyList(),
+    onRecentSearchClick: (String) -> Unit = {},
+    onRemoveRecentSearch: (String) -> Unit = {},
+    onClearRecentSearches: () -> Unit = {},
+    onSearchSubmit: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .shadow(elevation = 6.dp, shape = RoundedCornerShape(32.dp)),
-        shape = RoundedCornerShape(32.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-        )
-    ) {
-        Row(
+    Column(modifier = modifier.fillMaxWidth()) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Search",
-                tint = MobiCoralPrimary,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .size(24.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .shadow(elevation = 6.dp, shape = RoundedCornerShape(32.dp)),
+            shape = RoundedCornerShape(32.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
             )
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = MobiCoralPrimary,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(24.dp)
+                )
 
-            TextField(
-                value = searchQuery,
-                onValueChange = onQueryChange,
-                placeholder = {
-                    Column {
-                        Text(
-                            text = "Where to?",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "Anywhere · Any week · Add guests",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                TextField(
+                    value = searchQuery,
+                    onValueChange = onQueryChange,
+                    placeholder = {
+                        Column {
+                            Text(
+                                text = "Where to?",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Anywhere · Any week · Add guests",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            if (searchQuery.isNotBlank()) {
+                                onSearchSubmit(searchQuery)
+                            }
+                        }
+                    ),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("search_input")
+                )
+
+                if (searchQuery.isNotBlank()) {
+                    IconButton(
+                        onClick = { onQueryChange("") },
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear search",
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("search_input")
-            )
+                }
 
-            if (searchQuery.isNotBlank()) {
-                IconButton(
-                    onClick = { onQueryChange("") },
-                    modifier = Modifier.size(36.dp)
+                // Filter Button with Badge
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                            CircleShape
+                        )
+                        .clickable(onClick = onFilterClick)
+                        .padding(8.dp)
+                        .testTag("filter_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Clear search",
-                        modifier = Modifier.size(18.dp)
-                    )
+                    BadgedBox(
+                        badge = {
+                            if (activeFilterCount > 0) {
+                                Badge(
+                                    containerColor = MobiCoralPrimary,
+                                    contentColor = Color.White
+                                ) {
+                                    Text(text = "$activeFilterCount")
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Filter options",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
+        }
 
-            // Filter Button with Badge
-            Box(
+        // Recent searches chips row powered by Room Database
+        if (recentSearches.isNotEmpty()) {
+            Row(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
-                        CircleShape
-                    )
-                    .clickable(onClick = onFilterClick)
-                    .padding(8.dp)
-                    .testTag("filter_button")
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                BadgedBox(
-                    badge = {
-                        if (activeFilterCount > 0) {
-                            Badge(
-                                containerColor = MobiCoralPrimary,
-                                contentColor = Color.White
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = "Recent Searches",
+                        tint = MobiCoralPrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "Recent:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(recentSearches, key = { it }) { term ->
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+                            ),
+                            modifier = Modifier
+                                .clickable { onRecentSearchClick(term) }
+                                .testTag("recent_search_chip_$term")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
                             ) {
-                                Text(text = "$activeFilterCount")
+                                Text(
+                                    text = term,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .clickable { onRemoveRecentSearch(term) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove $term",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
                             }
                         }
                     }
+                }
+
+                TextButton(
+                    onClick = onClearRecentSearches,
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.testTag("clear_recent_searches_button")
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = "Filter options",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        text = "Clear",
+                        fontSize = 11.sp,
+                        color = MobiCoralPrimary,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }

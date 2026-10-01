@@ -28,11 +28,13 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.HomeWork
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import com.example.model.UserRole
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -108,6 +110,7 @@ fun AuthBottomSheet(
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
+    var registerRole by remember { mutableStateOf(UserRole.PROPERTY_SEEKER) }
     var localError by remember { mutableStateOf<String?>(null) }
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
 
@@ -397,6 +400,96 @@ fun AuthBottomSheet(
 
             // Input Fields
             if (currentMode == AuthMode.REGISTER) {
+                // Two-Role Toggle (Property Seeker vs Property Admin)
+                Text(
+                    text = "I am registering as:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 6.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .testTag("dialog_register_role_toggle"),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val isSeeker = registerRole == UserRole.PROPERTY_SEEKER
+                    Card(
+                        onClick = { registerRole = UserRole.PROPERTY_SEEKER },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSeeker) MobiCoralPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = if (isSeeker) 2.dp else 1.dp,
+                            color = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dialog_role_seeker")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Property Seeker",
+                                fontWeight = if (isSeeker) FontWeight.Bold else FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                color = if (isSeeker) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    val isAdmin = registerRole == UserRole.PROPERTY_ADMIN
+                    Card(
+                        onClick = { registerRole = UserRole.PROPERTY_ADMIN },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isAdmin) MobiCoralPrimary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = if (isAdmin) 2.dp else 1.dp,
+                            color = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("dialog_role_admin")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.HomeWork,
+                                contentDescription = null,
+                                tint = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Property Admin",
+                                fontWeight = if (isAdmin) FontWeight.Bold else FontWeight.SemiBold,
+                                fontSize = 12.sp,
+                                color = if (isAdmin) MobiCoralPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -566,7 +659,7 @@ fun AuthBottomSheet(
                                 localError = "Passwords do not match."
                                 return@Button
                             }
-                            viewModel.signUpWithEmail(name, email, password) { success, _ ->
+                            viewModel.signUpWithEmail(name, email, password, role = registerRole) { success, _ ->
                                 if (success) {
                                     onSuccess()
                                     onDismiss()

@@ -64,12 +64,18 @@ class FirestorePropertyService(
         hostName: String,
         hostBio: String,
         listingPurpose: String = "BNB_STAY",
+        currency: String = "KES",
+        imageUrl: String = "",
+        images: List<String> = emptyList(),
         imageUris: List<Uri> = emptyList(),
         imageUrls: List<String> = emptyList(),
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): String = withContext(Dispatchers.IO) {
         val propertyId = "prop_${UUID.randomUUID().toString().take(12)}"
-        val finalImageUrls = (imageUrls + imageUris.map { it.toString() }).filter { it.isNotBlank() }
+        val allImages = (images + imageUrls + listOf(imageUrl) + imageUris.map { it.toString() })
+            .filter { it.isNotBlank() }
+            .distinct()
+        val primaryImage = imageUrl.ifBlank { allImages.firstOrNull() ?: "" }
 
         onProgress(0.5f, "Preparing property listing for Firestore...")
 
@@ -96,6 +102,8 @@ class FirestorePropertyService(
             "latitude" to 40.7128,
             "longitude" to -74.0060,
             "pricePerNight" to pricePerNight.toLong(),
+            "price" to pricePerNight.toLong(), // EXACT number, no multiplication
+            "currency" to currency.uppercase().trim(), // exact saved currency (e.g. KES, USD)
             "rating" to 0.0,
             "reviewCount" to 0L,
             "isSuperhost" to false,
@@ -108,7 +116,10 @@ class FirestorePropertyService(
             "squareFeet" to 2200L,
             "hostName" to hostName,
             "hostBio" to hostBio,
-            "imageUrls" to finalImageUrls,
+            "imageUrl" to primaryImage, // exact base64 / photo URL
+            "imageUr1" to primaryImage, // exact base64 / photo URL
+            "images" to allImages,
+            "imageUrls" to allImages,
             "amenities" to listOf("Fast WiFi", "Chef Kitchen", "Air Conditioning", "Free Parking"),
             "createdAt" to System.currentTimeMillis()
         )
@@ -288,7 +299,8 @@ class FirestorePropertyService(
             val address = doc.getString("address") ?: ""
             val lat = doc.getDouble("latitude") ?: 40.7128
             val lon = doc.getDouble("longitude") ?: -74.0060
-            val price = doc.getLong("pricePerNight")?.toInt() ?: 150
+            val price = doc.getLong("pricePerNight")?.toInt() ?: doc.getLong("price")?.toInt() ?: 0
+            val currency = doc.getString("currency")?.ifBlank { "KES" } ?: "KES"
             val rating = doc.getDouble("rating") ?: 0.0
             val reviewCount = doc.getLong("reviewCount")?.toInt() ?: 0
             val isSuperhost = doc.getBoolean("isSuperhost") ?: false
@@ -304,10 +316,23 @@ class FirestorePropertyService(
             val hostName = doc.getString("hostName") ?: "Host"
             val hostBio = doc.getString("hostBio") ?: ""
 
-            @Suppress("UNCHECKED_CAST")
-            val imageUrls = doc.get("imageUrls") as? List<String> ?: emptyList()
+            val singleImageUrl = doc.getString("imageUrl") ?: doc.getString("imageUr1") ?: ""
+            val rawImages = ((doc.get("images") as? List<*>) ?: (doc.get("imageUrls") as? List<*>))
+                ?.mapNotNull { it?.toString() }
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+            val allImageStrings = if (singleImageUrl.isNotBlank() && !rawImages.contains(singleImageUrl)) {
+                listOf(singleImageUrl) + rawImages
+            } else if (rawImages.isNotEmpty()) {
+                rawImages
+            } else if (singleImageUrl.isNotBlank()) {
+                listOf(singleImageUrl)
+            } else {
+                emptyList()
+            }
+            val primaryImage = singleImageUrl.ifBlank { allImageStrings.firstOrNull() ?: "" }
 
-            val photos = imageUrls.mapIndexed { index, url ->
+            val photos = allImageStrings.mapIndexed { index, url ->
                 PropertyPhoto(
                     id = "$id-photo-$index",
                     propertyId = id,
@@ -333,11 +358,13 @@ class FirestorePropertyService(
                 latitude = lat,
                 longitude = lon,
                 pricePerNight = price,
+                currency = currency,
                 rating = rating,
                 reviewCount = reviewCount,
                 isSuperhost = isSuperhost,
                 isGuestFavorite = isGuestFavorite,
                 isRareFind = isRareFind,
+                imageUrl = primaryImage,
                 imageResIds = emptyList(),
                 photos = photos,
                 bedroomCount = bedrooms,

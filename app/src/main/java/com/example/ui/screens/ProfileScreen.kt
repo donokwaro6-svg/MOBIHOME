@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -82,6 +83,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import com.example.util.CurrencyUtil
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.model.AuthState
@@ -90,6 +101,12 @@ import com.example.ui.components.AuthMode
 import com.example.ui.components.EditProfileDialog
 import com.example.ui.components.GoogleLogoIcon
 import com.example.ui.components.HostNotificationsDialog
+import com.example.ui.components.AdminVerificationModalDialog
+import com.example.ui.components.TenantPropertyRequestDialog
+import com.example.ui.components.RoleChangeModalDialog
+import com.example.model.UserRole
+import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.HomeWork
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
 import com.example.viewmodel.Currency
@@ -107,6 +124,7 @@ fun ProfileScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val authState by viewModel.authState.collectAsStateWithLifecycle()
     val currency by viewModel.currency.collectAsStateWithLifecycle()
+    val preferredCurrency by viewModel.preferredCurrency.collectAsStateWithLifecycle()
     val creditsBalance by viewModel.userCreditsBalance.collectAsStateWithLifecycle()
     val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
 
@@ -117,6 +135,10 @@ fun ProfileScreen(
     var showHelpDialog by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
+    var showVerificationModal by remember { mutableStateOf(false) }
+    var showTenantRequestDialog by remember { mutableStateOf(false) }
+    var showRoleChangeModal by remember { mutableStateOf(false) }
+    val userProperties by viewModel.userProperties.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
@@ -129,6 +151,36 @@ fun ProfileScreen(
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
+                },
+                actions = {
+                    val currInfo = CurrencyUtil.getCurrencyInfo(preferredCurrency)
+                    Surface(
+                        onClick = { showCurrencyDialog = true },
+                        shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                        modifier = Modifier
+                            .padding(end = 12.dp)
+                            .testTag("currency_selector_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "${currInfo.flag} ${currInfo.code}",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Change Currency",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -432,6 +484,183 @@ fun ProfileScreen(
                         )
                     }
                 }
+
+                // Account Role & Verification Status Card
+                Card(
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth().testTag("profile_role_verification_card")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "Account Role & Access",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Registered as ${if (user.role == UserRole.PROPERTY_ADMIN) "Property Admin" else "Property Seeker"}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (user.role == UserRole.PROPERTY_ADMIN) MobiCoralPrimary.copy(alpha = 0.15f) else MobiEmerald.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = if (user.role == UserRole.PROPERTY_ADMIN) "🛡️ Admin" else "🔍 Seeker",
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (user.role == UserRole.PROPERTY_ADMIN) MobiCoralPrimary else MobiEmerald,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+
+                        // Fixed Role Display with Formal Change Role Request
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth().testTag("profile_role_display_card")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surface,
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.Lock,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Column {
+                                        Text(
+                                            text = if (user.role == UserRole.PROPERTY_ADMIN) "Property Administrator" else "Property Seeker",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = "Permanent account role assigned at registration",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                OutlinedButton(
+                                    onClick = { showRoleChangeModal = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MobiCoralPrimary
+                                    ),
+                                    border = BorderStroke(1.dp, MobiCoralPrimary.copy(alpha = 0.5f)),
+                                    modifier = Modifier.testTag("request_role_change_button")
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Change Role", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+
+                        // Specific actions depending on role
+                        if (user.role == UserRole.PROPERTY_ADMIN) {
+                            val isVerified = user.isEffectivelyVerified(userProperties.size)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Verified,
+                                            contentDescription = null,
+                                            tint = if (isVerified) MobiEmerald else MobiCoralPrimary,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = if (isVerified) "Verified Property Admin 🛡️" else "Verification Standards Pending",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = if (isVerified) MobiEmerald else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                    Text(
+                                        text = ">70 props · >150 tenants · >60% occupancy or monthly fee",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Button(
+                                    onClick = { showVerificationModal = true },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isVerified) MobiEmerald else MobiCoralPrimary
+                                    ),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.testTag("profile_admin_verification_btn")
+                                ) {
+                                    Text(if (isVerified) "Status" else "Verify", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            // Seeker feature
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Need a tailored rental or stay?", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("Post your requirements to verified property admins", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Button(
+                                    onClick = { showTenantRequestDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.testTag("profile_tenant_request_btn")
+                                ) {
+                                    Text("Request", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 // Unauthenticated Guest Card
                 Card(
@@ -686,6 +915,36 @@ fun ProfileScreen(
         )
     }
 
+    // Property Admin Verification Modal Dialog
+    if (showVerificationModal) {
+        AdminVerificationModalDialog(
+            viewModel = viewModel,
+            onDismiss = { showVerificationModal = false }
+        )
+    }
+
+    // Tenant Property Request Dialog
+    if (showTenantRequestDialog) {
+        TenantPropertyRequestDialog(
+            viewModel = viewModel,
+            onDismiss = { showTenantRequestDialog = false }
+        )
+    }
+
+    // Role Change Request Modal Dialog
+    if (showRoleChangeModal && currentUser != null) {
+        RoleChangeModalDialog(
+            user = currentUser!!,
+            viewModel = viewModel,
+            onDismiss = { showRoleChangeModal = false },
+            onSuccess = { msg ->
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(msg)
+                }
+            }
+        )
+    }
+
     // Auth Bottom Sheet Modal
     if (showAuthSheet) {
         AuthBottomSheet(
@@ -720,45 +979,101 @@ fun ProfileScreen(
         )
     }
 
-    // Currency Switcher Dialog
+    // Currency Switcher Dialog (Full Searchable World Currencies)
     if (showCurrencyDialog) {
+        var searchQuery by remember { mutableStateOf("") }
+        val filteredCurrencies = remember(searchQuery) {
+            if (searchQuery.isBlank()) {
+                CurrencyUtil.supportedCurrencies
+            } else {
+                CurrencyUtil.supportedCurrencies.filter {
+                    it.code.contains(searchQuery, ignoreCase = true) ||
+                    it.name.contains(searchQuery, ignoreCase = true) ||
+                    it.symbol.contains(searchQuery, ignoreCase = true)
+                }
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { showCurrencyDialog = false },
-            title = { Text("Choose Currency", fontWeight = FontWeight.Bold) },
+            title = {
+                Column {
+                    Text("Choose Preferred Currency", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Converts all listing prices for display. Does not alter saved prices in Firestore.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Currency.entries.forEach { curr ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable {
-                                    viewModel.setCurrency(curr)
-                                    showCurrencyDialog = false
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("Search currency (e.g. USD, KES, EUR, GBP)") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
                                 }
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            RadioButton(
-                                selected = currency == curr,
-                                onClick = {
-                                    viewModel.setCurrency(curr)
-                                    showCurrencyDialog = false
-                                },
-                                colors = RadioButtonDefaults.colors(selectedColor = MobiCoralPrimary)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = "${curr.flag}  ${curr.displayName}",
-                                    fontWeight = if (currency == curr) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 14.sp
-                                )
-                                Text(
-                                    text = "${curr.code} · ${curr.symbol}${if (curr == Currency.KES) " · Default Currency" else ""}",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 350.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(filteredCurrencies, key = { it.code }) { curr ->
+                            val isSelected = preferredCurrency.equals(curr.code, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isSelected) MobiCoralPrimary.copy(alpha = 0.12f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable {
+                                        viewModel.setPreferredCurrency(curr.code)
+                                        showCurrencyDialog = false
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = curr.flag, fontSize = 22.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${curr.name} (${curr.code})",
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${curr.code} · ${curr.symbol}${if (curr.code == "KES") " · Default (Base 1.0)" else ""}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MobiCoralPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }

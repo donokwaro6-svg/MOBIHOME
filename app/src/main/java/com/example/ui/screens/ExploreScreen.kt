@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -64,6 +65,7 @@ import com.example.ui.components.FilterBottomSheet
 import com.example.ui.components.MapViewCanvas
 import com.example.ui.components.PropertyCard
 import com.example.ui.components.SearchHeaderBar
+import com.example.ui.components.TenantPropertyRequestDialog
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.viewmodel.MobiHomeViewModel
 import com.example.viewmodel.ViewMode
@@ -81,8 +83,10 @@ fun ExploreScreen(
     val wishlistedIds by viewModel.wishlistedIds.collectAsStateWithLifecycle()
     val viewMode by viewModel.viewMode.collectAsStateWithLifecycle()
     val currency by viewModel.currency.collectAsStateWithLifecycle()
+    val recentSearches by viewModel.recentSearches.collectAsStateWithLifecycle()
 
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showTenantRequestDialog by remember { mutableStateOf(false) }
 
     val activeFilterCount = remember(filterState) {
         var count = 0
@@ -107,7 +111,22 @@ fun ExploreScreen(
                     searchQuery = filterState.query,
                     onQueryChange = { viewModel.updateSearchQuery(it) },
                     activeFilterCount = activeFilterCount,
-                    onFilterClick = { showFilterSheet = true }
+                    onFilterClick = { showFilterSheet = true },
+                    recentSearches = recentSearches,
+                    onRecentSearchClick = { term ->
+                        viewModel.updateSearchQuery(term)
+                        viewModel.addRecentSearch(term)
+                    },
+                    onRemoveRecentSearch = { term ->
+                        viewModel.removeRecentSearch(term)
+                    },
+                    onClearRecentSearches = {
+                        viewModel.clearRecentSearches()
+                    },
+                    onSearchSubmit = { term ->
+                        viewModel.updateSearchQuery(term)
+                        viewModel.addRecentSearch(term)
+                    }
                 )
 
                 PurposeFilterTabs(
@@ -166,7 +185,8 @@ fun ExploreScreen(
                 if (properties.isEmpty()) {
                     EmptyResultsView(
                         hasActiveFilters = filterState.query.isNotBlank() || filterState.selectedCategory != "all",
-                        onResetFilters = { viewModel.resetFilters() }
+                        onResetFilters = { viewModel.resetFilters() },
+                        onRequestProperty = { showTenantRequestDialog = true }
                     )
                 } else {
                     LazyColumn(
@@ -174,8 +194,77 @@ fun ExploreScreen(
                             .fillMaxSize()
                             .testTag("properties_list"),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        // Request a Property Feature Banner for tenants
+                        item {
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    MobiCoralPrimary.copy(alpha = 0.35f)
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showTenantRequestDialog = true }
+                                    .testTag("request_property_explore_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MobiCoralPrimary.copy(alpha = 0.15f),
+                                            modifier = Modifier.size(42.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.AutoAwesome,
+                                                    contentDescription = null,
+                                                    tint = MobiCoralPrimary,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(
+                                                text = "Can't find your ideal home?",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp
+                                            )
+                                            Text(
+                                                text = "Request a property & let verified admins respond",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { showTenantRequestDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier = Modifier.testTag("request_property_explore_btn")
+                                    ) {
+                                        Text("Request", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+
                         // Featured Hero Spotlight Banner (shown when no specific search filter is typed)
                         if (filterState.query.isBlank() && filterState.selectedCategory == "all") {
                             val firstProp = properties.firstOrNull()
@@ -186,7 +275,7 @@ fun ExploreScreen(
                                         currency = currency,
                                         onExploreClick = { onPropertyClick(firstProp) }
                                     )
-                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
                                 }
                             }
                         }
@@ -221,6 +310,13 @@ fun ExploreScreen(
             onGuestFavoriteToggle = { viewModel.toggleGuestFavoriteOnly() },
             onReset = { viewModel.resetFilters() },
             onDismiss = { showFilterSheet = false }
+        )
+    }
+
+    if (showTenantRequestDialog) {
+        TenantPropertyRequestDialog(
+            viewModel = viewModel,
+            onDismiss = { showTenantRequestDialog = false }
         )
     }
 }
@@ -379,7 +475,8 @@ fun FeaturedSpotlightBanner(
 @Composable
 fun EmptyResultsView(
     hasActiveFilters: Boolean = false,
-    onResetFilters: () -> Unit
+    onResetFilters: () -> Unit,
+    onRequestProperty: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier
@@ -408,22 +505,32 @@ fun EmptyResultsView(
 
         Text(
             text = if (hasActiveFilters)
-                "Try changing or clearing some of your search filters."
+                "Try changing your search terms or post a request directly to Property Admins."
             else
-                "There are no properties in the system yet. Be the first to host or list a property on MobiHome!",
+                "There are no properties in the system yet. You can post a custom requirement or host a property!",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center
         )
 
-        if (hasActiveFilters) {
-            Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (hasActiveFilters) {
+                OutlinedButton(
+                    onClick = onResetFilters,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(text = "Reset filters", fontWeight = FontWeight.Bold)
+                }
+            }
+
             Button(
-                onClick = onResetFilters,
+                onClick = onRequestProperty,
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary)
             ) {
-                Text(text = "Reset all filters", fontWeight = FontWeight.Bold)
+                Text(text = "Request a Property", fontWeight = FontWeight.Bold)
             }
         }
     }

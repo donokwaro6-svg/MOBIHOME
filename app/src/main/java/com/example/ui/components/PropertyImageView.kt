@@ -4,20 +4,24 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.R
 import com.example.model.PropertyPhoto
+import com.example.util.ImageBase64Helper
 
 @Composable
 fun PropertyImageView(
@@ -26,33 +30,33 @@ fun PropertyImageView(
     contentDescription: String? = null,
     contentScale: ContentScale = ContentScale.Crop
 ) {
-    if (photo == null) {
-        Image(
-            painter = painterResource(id = R.drawable.img_hero_banner),
-            contentDescription = contentDescription,
-            contentScale = contentScale,
-            modifier = modifier
-        )
-        return
-    }
+    val urlOrUri = photo?.urlOrUri
+    val resId = photo?.resId
 
-    if (photo.resId != null && photo.resId != 0) {
-        Image(
-            painter = painterResource(id = photo.resId),
-            contentDescription = contentDescription ?: photo.caption,
-            contentScale = contentScale,
-            modifier = modifier
-        )
-    } else if (!photo.urlOrUri.isNullOrBlank()) {
+    if (!urlOrUri.isNullOrBlank()) {
         val context = LocalContext.current
+        val isBase64 = remember(urlOrUri) { ImageBase64Helper.isBase64String(urlOrUri) }
+        val model: Any = remember(urlOrUri, isBase64) {
+            if (isBase64) {
+                ImageBase64Helper.decodeBase64ToByteArray(urlOrUri) ?: urlOrUri
+            } else {
+                urlOrUri
+            }
+        }
+
         AsyncImage(
             model = ImageRequest.Builder(context)
-                .data(photo.urlOrUri)
+                .data(model)
                 .crossfade(true)
-                .error(R.drawable.img_hero_banner)
-                .placeholder(R.drawable.img_hero_banner)
                 .build(),
-            contentDescription = contentDescription ?: photo.caption,
+            contentDescription = contentDescription ?: photo?.caption,
+            contentScale = contentScale,
+            modifier = modifier
+        )
+    } else if (resId != null && resId != 0) {
+        Image(
+            painter = painterResource(id = resId),
+            contentDescription = contentDescription ?: photo?.caption,
             contentScale = contentScale,
             modifier = modifier
         )
@@ -62,10 +66,12 @@ fun PropertyImageView(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Image,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                imageVector = Icons.Default.Home,
+                contentDescription = contentDescription ?: "No image",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.size(36.dp)
             )
         }
     }
 }
+

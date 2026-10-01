@@ -20,9 +20,19 @@ import com.example.model.Property
 import com.example.model.PropertyCategory
 import com.example.model.PropertyPhoto
 import com.example.model.PropertyType
+import com.example.model.PropertyAdmin
+import com.example.data.repository.PropertyAdminRepository
 import com.example.model.SearchFilterState
+import com.example.model.TenantPropertyRequest
+import com.example.model.PropertyOptionResponse
+import com.example.model.UserRole
+import com.example.data.local.TenantPropertyRequestEntity
+import com.example.data.local.TenantRequestResponseEntity
+import kotlinx.coroutines.flow.map
 import android.net.Uri
 import com.example.data.firebase.FirestorePropertyService
+import com.example.util.CurrencyUtil
+import com.example.util.ImageBase64Helper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -68,15 +78,12 @@ enum class Currency(
     GBP("£", "GBP", "British Pound", "🇬🇧", 0.79),
     JPY("¥", "JPY", "Japanese Yen", "🇯🇵", 155.0);
 
-    fun format(amountUsd: Number): String {
-        val converted = (amountUsd.toDouble() * rateFromUsd).toLong()
-        val formattedNumber = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(converted)
-        return if (symbol.length > 1) "$symbol $formattedNumber" else "$symbol$formattedNumber"
+    fun format(amount: Number): String {
+        return CurrencyUtil.formatPrice(amount.toDouble(), code)
     }
 
     fun formatConverted(convertedAmount: Number): String {
-        val formattedNumber = java.text.NumberFormat.getNumberInstance(java.util.Locale.US).format(convertedAmount.toLong())
-        return if (symbol.length > 1) "$symbol $formattedNumber" else "$symbol$formattedNumber"
+        return CurrencyUtil.formatPrice(convertedAmount.toDouble(), code)
     }
 }
 
@@ -111,12 +118,30 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         wishlistDao = db.wishlistDao(),
         bookingDao = db.bookingDao(),
         hostNotificationDao = db.hostNotificationDao(),
+        recentSearchDao = db.recentSearchDao(),
+        tenantPropertyRequestDao = db.tenantPropertyRequestDao(),
         firebasePhotoService = firebasePhotoService,
         firestorePropertyService = firestorePropertyService
     )
 
     val authState: StateFlow<AuthState> = firebaseAuthService.authState
     val currentUser: StateFlow<AuthUser?> = firebaseAuthService.currentUser
+
+    val recentSearches: StateFlow<List<String>> = repository.recentSearches
+        .map { list -> list.map { it.query } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allTenantRequests: StateFlow<List<TenantPropertyRequest>> = repository.allTenantRequests
+        .map { list -> list.map { it.toDomain() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allRequestResponses: StateFlow<List<PropertyOptionResponse>> = repository.allRequestResponses
+        .map { list -> list.map { it.toDomain() } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun getTenantResponses(requestId: String): kotlinx.coroutines.flow.Flow<List<PropertyOptionResponse>> {
+        return repository.getResponsesForRequest(requestId).map { list -> list.map { it.toDomain() } }
+    }
 
     private val _uploadState = MutableStateFlow<FirebaseUploadState>(FirebaseUploadState.Idle)
     val uploadState: StateFlow<FirebaseUploadState> = _uploadState.asStateFlow()
@@ -127,7 +152,14 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
     private val _viewMode = MutableStateFlow(ViewMode.LIST)
     val viewMode: StateFlow<ViewMode> = _viewMode.asStateFlow()
 
-    private val _currency = MutableStateFlow(Currency.KES)
+    private val _preferredCurrency = MutableStateFlow(
+        CurrencyUtil.getSavedPreferredCurrency(application)
+    )
+    val preferredCurrency: StateFlow<String> = _preferredCurrency.asStateFlow()
+
+    private val _currency = MutableStateFlow(
+        runCatching { Currency.valueOf(CurrencyUtil.getSavedPreferredCurrency(application)) }.getOrDefault(Currency.KES)
+    )
     val currency: StateFlow<Currency> = _currency.asStateFlow()
 
     private val _selectedPropertyId = MutableStateFlow<String?>(null)
@@ -233,6 +265,14 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val propertyAdmins: StateFlow<List<PropertyAdmin>> = combine(
+        allProperties,
+        currentUser,
+        userProperties
+    ) { props, user, userProps ->
+        PropertyAdminRepository.getCombinedAdmins(props, user, userProps)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PropertyAdminRepository.curatedAdmins)
+
     private val _isRefreshingUserListings = MutableStateFlow(false)
     val isRefreshingUserListings: StateFlow<Boolean> = _isRefreshingUserListings.asStateFlow()
 
@@ -275,6 +315,16 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
 
     fun setCurrency(c: Currency) {
         _currency.value = c
+        setPreferredCurrency(c.code)
+    }
+
+    fun setPreferredCurrency(currencyCode: String) {
+        val code = currencyCode.uppercase().trim()
+        _preferredCurrency.value = code
+        CurrencyUtil.savePreferredCurrency(getApplication(), code)
+        runCatching { Currency.valueOf(code) }.getOrNull()?.let {
+            _currency.value = it
+        }
     }
 
     fun updateSearchQuery(query: String) {
@@ -594,7 +644,10 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         maxGuests: Int,
         hostName: String,
         hostBio: String,
-        imageResId: Int,
+        currency: String = "KES",
+        imageUrl: String = "",
+        base64Images: List<String> = emptyList(),
+        imageResId: Int = 0,
         listingPurpose: ListingPurpose = ListingPurpose.BNB_STAY,
         initialPhotoUris: List<Uri> = emptyList(),
         onComplete: ((Boolean, String?) -> Unit)? = null
@@ -605,6 +658,13 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             _uploadState.value = FirebaseUploadState.Uploading(0.1f, "Connecting to Firebase...")
             try {
+                // Convert any initialPhotoUris to base64
+                val convertedBase64List = initialPhotoUris.mapNotNull { uri ->
+                    ImageBase64Helper.uriToBase64(getApplication(), uri)
+                }
+                val allBase64 = (base64Images + convertedBase64List).filter { it.isNotBlank() }
+                val primaryImg = imageUrl.ifBlank { allBase64.firstOrNull() ?: "" }
+
                 val newId = repository.createFirestoreListing(
                     userId = userId,
                     title = title,
@@ -613,7 +673,7 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
                     city = city,
                     country = country,
                     address = address,
-                    pricePerNight = pricePerNight,
+                    pricePerNight = pricePerNight, // EXACT number, no multiplication
                     bedrooms = bedrooms,
                     beds = beds,
                     bathrooms = bathrooms,
@@ -621,6 +681,9 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
                     hostName = hostName.ifBlank { user?.displayName ?: "Host" },
                     hostBio = hostBio,
                     listingPurpose = listingPurpose.name,
+                    currency = currency.uppercase().trim(),
+                    imageUrl = primaryImg,
+                    images = allBase64,
                     imageUris = initialPhotoUris,
                     onProgress = { progress, msg ->
                         _uploadState.value = FirebaseUploadState.Uploading(progress, msg)
@@ -630,11 +693,11 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
                     photo = PropertyPhoto(
                         id = newId,
                         propertyId = newId,
-                        urlOrUri = null,
-                        resId = imageResId,
+                        urlOrUri = primaryImg.ifBlank { null },
+                        resId = if (primaryImg.isBlank() && imageResId != 0) imageResId else null,
                         caption = title
                     ),
-                    message = "Listing saved to Firestore with photos stored in Firebase Storage!"
+                    message = "Listing saved successfully to Firestore!"
                 )
                 fetchHostListings()
                 onComplete?.invoke(true, newId)
@@ -665,14 +728,311 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun signUpWithEmail(name: String, email: String, password: String, onComplete: ((Boolean, String?) -> Unit)? = null) {
+    fun signUpWithEmail(
+        name: String,
+        email: String,
+        password: String,
+        role: UserRole = UserRole.PROPERTY_SEEKER,
+        onComplete: ((Boolean, String?) -> Unit)? = null
+    ) {
         viewModelScope.launch {
-            val result = firebaseAuthService.signUpWithEmail(name, email, password)
+            val result = firebaseAuthService.signUpWithEmail(name, email, password, role)
             result.fold(
-                onSuccess = { user -> onComplete?.invoke(true, "Account created! Welcome, ${user.displayName}") },
+                onSuccess = { user -> onComplete?.invoke(true, "Account created as ${role.label}! Welcome, ${user.displayName}") },
                 onFailure = { err -> onComplete?.invoke(false, err.message) }
             )
         }
+    }
+
+    // Recent Searches
+    fun addRecentSearch(query: String) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            repository.addRecentSearch(query)
+        }
+    }
+
+    fun removeRecentSearch(query: String) {
+        viewModelScope.launch {
+            repository.removeRecentSearch(query)
+        }
+    }
+
+    fun clearRecentSearches() {
+        viewModelScope.launch {
+            repository.clearRecentSearches()
+        }
+    }
+
+    // Tenant Property Requests & Admin Responses
+    fun submitPropertyRequest(
+        title: String,
+        purpose: String,
+        city: String,
+        neighborhood: String,
+        maxBudget: Double,
+        currency: String = "KES",
+        bedrooms: Int = 1,
+        bathrooms: Int = 1,
+        moveInDate: String = "Flexible",
+        leaseDuration: String = "12 Months",
+        requiredAmenities: String = "",
+        notes: String = "",
+        tenantPhone: String = "",
+        onComplete: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val user = currentUser.value
+        val tenantId = user?.uid ?: "tenant_${UUID.randomUUID().toString().take(6)}"
+        val tenantName = user?.displayName ?: "Tenant"
+        val tenantEmail = user?.email ?: ""
+
+        val request = TenantPropertyRequestEntity(
+            id = "req_${UUID.randomUUID().toString().take(8)}",
+            tenantId = tenantId,
+            tenantName = tenantName,
+            tenantEmail = tenantEmail,
+            tenantPhone = tenantPhone,
+            title = title,
+            purpose = purpose,
+            city = city,
+            neighborhood = neighborhood,
+            maxBudget = maxBudget,
+            currency = currency.uppercase().trim(),
+            bedrooms = bedrooms,
+            bathrooms = bathrooms,
+            moveInDate = moveInDate,
+            leaseDuration = leaseDuration,
+            requiredAmenities = requiredAmenities,
+            notes = notes
+        )
+
+        viewModelScope.launch {
+            try {
+                repository.submitTenantPropertyRequest(request)
+                onComplete?.invoke(true, "Request successfully broadcasted to Property Admins!")
+            } catch (e: Exception) {
+                onComplete?.invoke(false, e.localizedMessage ?: "Failed to post request")
+            }
+        }
+    }
+
+    fun submitAdminResponseToRequest(
+        requestId: String,
+        propertyId: String? = null,
+        propertyTitle: String,
+        offeredPrice: Double,
+        currency: String = "KES",
+        propertyLocation: String = "",
+        propertyImage: String? = null,
+        message: String,
+        adminPhone: String = "",
+        onComplete: ((Boolean, String?) -> Unit)? = null
+    ) {
+        val user = currentUser.value
+        val adminId = user?.uid ?: "admin_${UUID.randomUUID().toString().take(6)}"
+        val adminName = user?.displayName ?: "Property Admin"
+        val adminEmail = user?.email ?: ""
+        val myPropsCount = userProperties.value.size
+        val isVerified = user?.isEffectivelyVerified(myPropsCount) ?: false
+
+        val response = TenantRequestResponseEntity(
+            id = "resp_${UUID.randomUUID().toString().take(8)}",
+            requestId = requestId,
+            adminId = adminId,
+            adminName = adminName,
+            adminEmail = adminEmail,
+            adminPhone = adminPhone,
+            isAdminVerified = isVerified,
+            propertyId = propertyId,
+            propertyTitle = propertyTitle,
+            offeredPrice = offeredPrice,
+            currency = currency.uppercase().trim(),
+            propertyLocation = propertyLocation,
+            propertyImage = propertyImage,
+            message = message
+        )
+
+        viewModelScope.launch {
+            try {
+                repository.submitAdminResponseToRequest(response)
+                onComplete?.invoke(true, "Your property option has been sent to the tenant!")
+            } catch (e: Exception) {
+                onComplete?.invoke(false, e.localizedMessage ?: "Failed to send response")
+            }
+        }
+    }
+
+    fun deletePropertyRequest(requestId: String) {
+        viewModelScope.launch {
+            repository.deleteTenantRequest(requestId)
+        }
+    }
+
+    fun deleteTenantRequest(requestId: String) = deletePropertyRequest(requestId)
+
+    fun submitPropertyRequest(
+        title: String,
+        purpose: ListingPurpose? = null,
+        city: String,
+        preferredNeighborhood: String = "",
+        maxBudget: Int,
+        currency: String = "KES",
+        bedrooms: Int = 1,
+        bathrooms: Int = 1,
+        desiredMoveInDate: String = "Immediate / Flexible",
+        leaseDuration: String = "12 Months",
+        requiredAmenities: List<String> = emptyList(),
+        contactPhone: String = "",
+        specialRequirements: String = "",
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        val user = currentUser.value
+        val tenantId = user?.uid ?: "tenant_${UUID.randomUUID().toString().take(6)}"
+        val tenantName = user?.displayName ?: "Tenant"
+        val tenantEmail = user?.email ?: ""
+
+        val request = TenantPropertyRequestEntity(
+            id = "req_${UUID.randomUUID().toString().take(8)}",
+            tenantId = tenantId,
+            tenantName = tenantName,
+            tenantEmail = tenantEmail,
+            tenantPhone = contactPhone,
+            title = title,
+            purpose = purpose?.name ?: "FOR_RENT",
+            city = city,
+            neighborhood = preferredNeighborhood,
+            maxBudget = maxBudget.toDouble(),
+            currency = currency.uppercase().trim(),
+            bedrooms = bedrooms,
+            bathrooms = bathrooms,
+            moveInDate = desiredMoveInDate,
+            leaseDuration = leaseDuration,
+            requiredAmenities = requiredAmenities.joinToString(", "),
+            notes = specialRequirements
+        )
+
+        viewModelScope.launch {
+            try {
+                repository.submitTenantPropertyRequest(request)
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    fun submitAdminResponseToRequest(
+        requestId: String,
+        propertyId: String? = null,
+        propertyTitle: String,
+        offeredPrice: Double,
+        currency: String = "KES",
+        city: String = "",
+        address: String = "",
+        imageUrl: String? = null,
+        message: String = "",
+        adminPhone: String = "",
+        onComplete: ((Boolean) -> Unit)? = null
+    ) {
+        val user = currentUser.value
+        val adminId = user?.uid ?: "admin_${UUID.randomUUID().toString().take(6)}"
+        val adminName = user?.displayName ?: "Property Admin"
+        val adminEmail = user?.email ?: ""
+        val myPropsCount = userProperties.value.size
+        val isVerified = user?.isEffectivelyVerified(myPropsCount) ?: false
+
+        val location = if (city.isNotBlank() && address.isNotBlank()) "$city · $address" else city.ifBlank { address }
+        val response = TenantRequestResponseEntity(
+            id = "resp_${UUID.randomUUID().toString().take(8)}",
+            requestId = requestId,
+            adminId = adminId,
+            adminName = adminName,
+            adminEmail = adminEmail,
+            adminPhone = adminPhone,
+            isAdminVerified = isVerified,
+            propertyId = propertyId,
+            propertyTitle = propertyTitle,
+            offeredPrice = offeredPrice,
+            currency = currency.uppercase().trim(),
+            propertyLocation = location,
+            propertyImage = imageUrl,
+            message = message
+        )
+
+        viewModelScope.launch {
+            try {
+                repository.submitAdminResponseToRequest(response)
+                onComplete?.invoke(true)
+            } catch (e: Exception) {
+                onComplete?.invoke(false)
+            }
+        }
+    }
+
+    // Role Switching and Admin Verification
+    fun submitRoleChangeRequest(
+        fullName: String,
+        email: String,
+        reason: String,
+        password: String,
+        targetRole: UserRole,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = firebaseAuthService.changeRoleWithVerification(
+                fullName = fullName,
+                email = email,
+                reason = reason,
+                password = password,
+                targetRole = targetRole
+            )
+            result.fold(
+                onSuccess = {
+                    onResult(true, "Role successfully switched to ${targetRole.label}!")
+                },
+                onFailure = { error ->
+                    onResult(false, error.message ?: "Failed to change role.")
+                }
+            )
+        }
+    }
+
+    fun switchUserRole(newRole: UserRole) {
+        firebaseAuthService.switchUserRole(newRole)
+    }
+
+    fun updateUserRole(newRole: UserRole) = switchUserRole(newRole)
+
+    fun simulateAdminMetrics(tenants: Int, occupancy: Double) {
+        updateAdminDemoMetrics(tenants, occupancy)
+    }
+
+    fun payMonthlyAdminVerification(
+        amountKes: Int = 2500,
+        paymentMethod: String = "M-Pesa",
+        onComplete: (Boolean) -> Unit
+    ) {
+        val success = firebaseAuthService.payMonthlyVerification(1)
+        onComplete(success)
+    }
+
+    fun payMonthlyAdminVerification(paymentMethod: String = "M-Pesa", onComplete: (Boolean, String) -> Unit) {
+        val success = firebaseAuthService.payMonthlyVerification(1)
+        if (success) {
+            onComplete(true, "Monthly verification active! You are now a Verified Property Admin 🛡️")
+        } else {
+            onComplete(false, "Could not process verification subscription.")
+        }
+    }
+
+    fun updateAdminDemoMetrics(tenantsCount: Int, occupancyRatePercent: Double) {
+        firebaseAuthService.updateAdminStats(tenantsCount, occupancyRatePercent)
+    }
+
+    fun isCurrentAdminVerified(): Boolean {
+        val user = currentUser.value ?: return false
+        val myPropsCount = userProperties.value.size
+        return user.isEffectivelyVerified(myPropsCount)
     }
 
     fun sendPasswordReset(email: String, onComplete: (Boolean, String) -> Unit) {
@@ -720,3 +1080,46 @@ class MobiHomeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 }
+
+fun TenantPropertyRequestEntity.toDomain() = TenantPropertyRequest(
+    id = id,
+    tenantId = tenantId,
+    tenantName = tenantName,
+    tenantEmail = tenantEmail,
+    tenantPhone = tenantPhone,
+    title = title,
+    purpose = purpose,
+    city = city,
+    preferredNeighborhood = neighborhood,
+    maxBudget = maxBudget,
+    currency = currency,
+    bedrooms = bedrooms,
+    bathrooms = bathrooms,
+    desiredMoveInDate = moveInDate,
+    leaseDuration = leaseDuration,
+    requiredAmenities = if (requiredAmenities.isBlank()) emptyList() else requiredAmenities.split(", ").map { it.trim() },
+    specialRequirements = notes,
+    status = status,
+    responsesCount = responsesCount,
+    createdAt = createdAt
+)
+
+fun TenantRequestResponseEntity.toDomain() = PropertyOptionResponse(
+    id = id,
+    requestId = requestId,
+    adminId = adminId,
+    adminName = adminName,
+    adminEmail = adminEmail,
+    adminPhone = adminPhone,
+    adminIsVerified = isAdminVerified,
+    propertyId = propertyId,
+    propertyTitle = propertyTitle,
+    offeredPrice = offeredPrice,
+    currency = currency,
+    city = propertyLocation,
+    address = propertyLocation,
+    imageUrl = propertyImage,
+    message = message,
+    createdAt = createdAt
+)
+

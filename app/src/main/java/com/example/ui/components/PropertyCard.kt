@@ -49,6 +49,7 @@ import com.example.model.allPhotoItems
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
 import com.example.ui.theme.MobiGoldRating
+import com.example.util.CurrencyUtil
 import com.example.viewmodel.Currency
 
 @Composable
@@ -233,22 +234,43 @@ fun PropertyCard(
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Price formatting with purpose suffix
-        Row(
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Text(
-                text = currency.format(property.pricePerNight),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                text = property.priceSuffix,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 2.dp)
-            )
+        // Price formatting with Airbnb-style currency handling:
+        // Always show primary price in original listing currency, with converted price in small grey text
+        val originalFormattedPrice = CurrencyUtil.formatPrice(
+            property.pricePerNight.toDouble(),
+            property.currency
+        )
+        val convertedPriceText = CurrencyUtil.formatConvertedPrice(
+            amountInListingCurrency = property.pricePerNight.toDouble(),
+            listingCurrency = property.currency,
+            preferredCurrency = currency.code
+        )
+
+        Column {
+            Row(
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Text(
+                    text = originalFormattedPrice,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = property.priceSuffix,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 2.dp)
+                )
+            }
+            if (convertedPriceText != null) {
+                Text(
+                    text = "($convertedPriceText)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
     }
 }

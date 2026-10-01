@@ -20,11 +20,13 @@ data class Property(
     val latitude: Double = -1.2921,
     val longitude: Double = 36.8219,
     val pricePerNight: Int = 0,
+    val currency: String = "KES",
     val rating: Double = 0.0,
     val reviewCount: Int = 0,
     val isSuperhost: Boolean = false,
     val isGuestFavorite: Boolean = true,
     val isRareFind: Boolean = false,
+    val imageUrl: String = "",
     val imageResIds: List<Int> = emptyList(),
     val photos: List<PropertyPhoto> = emptyList(),
     val bedroomCount: Int = 1,
@@ -48,6 +50,7 @@ data class Property(
     val isCommercialOrOffice: Boolean get() = propertyType.isCommercialOrOffice
     val isOfficeOrCommercial: Boolean get() = propertyType.isCommercialOrOffice
     val priceSuffix: String get() = listingPurpose.priceSuffix
+    val primaryPhoto: PropertyPhoto? get() = allPhotoItems().firstOrNull()
 
     fun priceUnitLabel(): String = when (listingPurpose) {
         ListingPurpose.FOR_SALE -> " total"
@@ -141,12 +144,27 @@ data class PropertyPhoto(
 
 fun Property.allPhotoItems(): List<PropertyPhoto> {
     val items = mutableListOf<PropertyPhoto>()
-    // Add custom/Firebase uploaded photos first
-    items.addAll(photos)
-    // Add resource ID photos
+    if (imageUrl.isNotBlank()) {
+        items.add(
+            PropertyPhoto(
+                id = "$id-primary",
+                propertyId = id,
+                urlOrUri = imageUrl,
+                caption = title,
+                storagePath = "properties/$id/photos/primary.jpg",
+                isSyncedToFirebase = true
+            )
+        )
+    }
+    // Add custom/Firebase uploaded photos
+    photos.forEach { p ->
+        if (p.urlOrUri != imageUrl) {
+            items.add(p)
+        }
+    }
+    // Add resource ID photos if any
     imageResIds.forEachIndexed { index, resId ->
-        // Avoid duplicates if resId is already included
-        if (photos.none { it.resId == resId }) {
+        if (items.none { it.resId == resId }) {
             items.add(
                 PropertyPhoto(
                     id = "$id-res-$index",
@@ -160,19 +178,9 @@ fun Property.allPhotoItems(): List<PropertyPhoto> {
             )
         }
     }
-    if (items.isEmpty()) {
-        items.add(
-            PropertyPhoto(
-                id = "$id-default",
-                propertyId = id,
-                resId = com.example.R.drawable.img_hero_banner,
-                caption = "Featured View",
-                storagePath = "properties/$id/photos/featured.jpg",
-                isSyncedToFirebase = true,
-                fileSizeKb = 420
-            )
-        )
-    }
     return items
 }
+
+val Property.primaryPhoto: PropertyPhoto?
+    get() = allPhotoItems().firstOrNull()
 

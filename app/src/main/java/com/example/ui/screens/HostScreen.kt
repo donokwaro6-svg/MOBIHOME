@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -14,9 +15,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,10 +45,18 @@ import androidx.compose.material.icons.filled.BookmarkAdded
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
+import com.example.model.TenantPropertyRequest
+import com.example.model.UserRole
+import com.example.ui.components.AdminRespondToRequestDialog
+import com.example.ui.components.AdminVerificationModalDialog
+import com.example.ui.components.PropertySeekerAdminsView
+import com.example.ui.components.TenantPropertyRequestDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -107,7 +119,24 @@ import com.example.ui.components.PropertyImageView
 import com.example.ui.theme.MobiCoralPrimary
 import com.example.ui.theme.MobiEmerald
 import com.example.ui.theme.MobiGoldRating
+import com.example.util.CurrencyUtil
+import com.example.util.ImageBase64Helper
 import com.example.viewmodel.MobiHomeViewModel
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.request.ImageRequest
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,15 +153,18 @@ fun HostScreen(
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
     val hostNotifications by viewModel.hostNotifications.collectAsStateWithLifecycle()
     val unreadNotificationCount by viewModel.unreadNotificationCount.collectAsStateWithLifecycle()
+    val allTenantRequests by viewModel.allTenantRequests.collectAsStateWithLifecycle()
 
     var showAuthSheet by remember { mutableStateOf(false) }
     var showCreateListingDialog by remember { mutableStateOf(false) }
     var showNotificationsDialog by remember { mutableStateOf(false) }
+    var showVerificationModal by remember { mutableStateOf(false) }
+    var requestToRespond by remember { mutableStateOf<TenantPropertyRequest?>(null) }
     var propertyForPhotoManagement by remember { mutableStateOf<Property?>(null) }
     var propertyToEdit by remember { mutableStateOf<Property?>(null) }
     var propertyToDelete by remember { mutableStateOf<Property?>(null) }
 
-    var selectedHostFilter by remember { mutableStateOf(0) } // 0: My Hosted Listings, 1: All Network Listings
+    var selectedHostFilter by remember { mutableStateOf(0) } // 0: My Hosted Listings, 1: All Network Listings, 2: Tenant Requests
 
     // Requirement 2: On dashboard load, fetch listings with query (where("userId", "==", currentUser.uid))
     androidx.compose.runtime.LaunchedEffect(currentUser?.uid) {
@@ -228,6 +260,84 @@ fun HostScreen(
         }
     }
 
+    val isPropertySeeker = currentUser?.role == UserRole.PROPERTY_SEEKER || currentUser == null
+    var showTenantRequestDialog by remember { mutableStateOf(false) }
+
+    if (isPropertySeeker) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "Property Admins",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Verified managers & hosts directory",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    actions = {
+                        Button(
+                            onClick = {
+                                if (currentUser == null) {
+                                    showAuthSheet = true
+                                } else {
+                                    showTenantRequestDialog = true
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .padding(end = 12.dp)
+                                .testTag("topbar_request_property_button")
+                        ) {
+                            Icon(Icons.Default.HomeWork, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Request Property", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
+                )
+            },
+            modifier = modifier
+        ) { paddingValues ->
+            PropertySeekerAdminsView(
+                viewModel = viewModel,
+                onPropertyClick = onPropertyClick,
+                onRequestPropertyClick = {
+                    if (currentUser == null) {
+                        showAuthSheet = true
+                    } else {
+                        showTenantRequestDialog = true
+                    }
+                },
+                modifier = Modifier.padding(paddingValues)
+            )
+        }
+
+        if (showTenantRequestDialog) {
+            TenantPropertyRequestDialog(
+                viewModel = viewModel,
+                onDismiss = { showTenantRequestDialog = false }
+            )
+        }
+
+        if (showAuthSheet) {
+            AuthBottomSheet(
+                viewModel = viewModel,
+                initialMode = AuthMode.SIGN_IN,
+                onDismiss = { showAuthSheet = false }
+            )
+        }
+
+        return
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -301,79 +411,162 @@ fun HostScreen(
         ) {
             // Host Welcome & Superhost Status Card
             item {
-                Card(
-                    shape = RoundedCornerShape(22.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                val isPropertyAdminVerified = currentUser?.isEffectivelyVerified(myHostedProperties.size) == true
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Card(
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        val user = currentUser
-                        if (user?.photoUrl != null) {
-                            AsyncImage(
-                                model = user.photoUrl,
-                                contentDescription = "Host Avatar",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .clip(CircleShape)
-                                    .background(MobiCoralPrimary.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (user != null) {
-                                    Text(
-                                        text = user.initials,
-                                        color = MobiCoralPrimary,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 20.sp
-                                    )
-                                } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(18.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val user = currentUser
+                            if (user?.photoUrl != null) {
+                                AsyncImage(
+                                    model = user.photoUrl,
+                                    contentDescription = "Host Avatar",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(CircleShape)
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(56.dp)
+                                        .clip(CircleShape)
+                                        .background(MobiCoralPrimary.copy(alpha = 0.15f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (user != null) {
+                                        Text(
+                                            text = user.initials,
+                                            color = MobiCoralPrimary,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 20.sp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = "Host Avatar",
+                                            tint = MobiCoralPrimary,
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.width(14.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (user != null) "Welcome back, ${user.displayName}!" else "Welcome, MobiHome Host!",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = "Host Avatar",
-                                        tint = MobiCoralPrimary,
-                                        modifier = Modifier.size(32.dp)
+                                        imageVector = Icons.Default.Verified,
+                                        contentDescription = null,
+                                        tint = MobiEmerald,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isPropertyAdminVerified) "Verified Property Admin 🛡️" else if (user?.isSuperhost == true) "Verified Superhost" else "Property Admin",
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isPropertyAdminVerified) MobiEmerald else MaterialTheme.colorScheme.primary,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = " · Photo Management Active",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 13.sp
                                     )
                                 }
                             }
                         }
+                    }
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                    // Admin Verification & Criteria Dashboard Card
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isPropertyAdminVerified) MobiEmerald.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isPropertyAdminVerified) MobiEmerald.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showVerificationModal = true }
+                            .testTag("host_admin_verification_card")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isPropertyAdminVerified) MobiEmerald.copy(alpha = 0.18f) else MobiCoralPrimary.copy(alpha = 0.14f),
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Verified,
+                                            contentDescription = null,
+                                            tint = if (isPropertyAdminVerified) MobiEmerald else MobiCoralPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = if (isPropertyAdminVerified) "Verified Property Admin" else "Property Admin Verification",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                        if (isPropertyAdminVerified) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("🛡️", fontSize = 12.sp)
+                                        }
+                                    }
+                                    Text(
+                                        text = if (isPropertyAdminVerified)
+                                            "Verified status active · High tenant trust & priority ranking"
+                                        else
+                                            ">70 properties, >150 tenants, >60% occupancy or monthly verification",
+                                        fontSize = 11.sp,
+                                        color = if (isPropertyAdminVerified) MobiEmerald else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (user != null) "Welcome back, ${user.displayName}!" else "Welcome, MobiHome Host!",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Verified,
-                                    contentDescription = null,
-                                    tint = MobiEmerald,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
+                            Button(
+                                onClick = { showVerificationModal = true },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isPropertyAdminVerified) MobiEmerald else MobiCoralPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.testTag("admin_verification_details_btn")
+                            ) {
                                 Text(
-                                    text = if (user?.isSuperhost == true) "Verified Superhost" else "Verified Host",
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MobiEmerald,
-                                    fontSize = 13.sp
-                                )
-                                Text(
-                                    text = " · Photo Management Active",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontSize = 13.sp
+                                    text = if (isPropertyAdminVerified) "Status" else "Check / Verify",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -622,18 +815,18 @@ fun HostScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         FilterChip(
                             selected = selectedHostFilter == 0,
                             onClick = { selectedHostFilter = 0 },
-                            label = { Text("My Listings (${myHostedProperties.size})") },
+                            label = { Text("My Listings (${myHostedProperties.size})", fontSize = 11.sp) },
                             leadingIcon = {
                                 if (selectedHostFilter == 0) {
                                     Icon(
                                         imageVector = Icons.Default.CheckCircle,
                                         contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
                             },
@@ -646,18 +839,122 @@ fun HostScreen(
                         FilterChip(
                             selected = selectedHostFilter == 1,
                             onClick = { selectedHostFilter = 1 },
-                            label = { Text("All Network Listings (${allProperties.size})") },
+                            label = { Text("All Listings (${allProperties.size})", fontSize = 11.sp) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         )
+
+                        FilterChip(
+                            selected = selectedHostFilter == 2,
+                            onClick = { selectedHostFilter = 2 },
+                            label = { Text("Tenant Requests (${allTenantRequests.size})", fontSize = 11.sp) },
+                            leadingIcon = {
+                                if (selectedHostFilter == 2) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MobiEmerald.copy(alpha = 0.18f),
+                                selectedLabelColor = MobiEmerald
+                            ),
+                            modifier = Modifier.testTag("filter_tenant_requests_chip")
+                        )
                     }
                 }
             }
 
-            // Requirement 3: If empty, show "No properties yet - Add your first property" empty state.
-            if (displayedProperties.isEmpty()) {
+            // If selectedHostFilter == 2: Show Tenant Requests Feed for Property Admins
+            if (selectedHostFilter == 2) {
+                if (allTenantRequests.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = MobiCoralPrimary, modifier = Modifier.size(36.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text("No Tenant Requests Currently", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    "When tenants submit their requirements (e.g. 2-bed in Kilimani within budget), they will appear here so you can propose matching property options.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(allTenantRequests, key = { it.id }) { req ->
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(req.title, fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (req.status == "RESPONDED") MobiEmerald.copy(alpha = 0.15f) else MobiCoralPrimary.copy(alpha = 0.15f)
+                                    ) {
+                                        Text(
+                                            text = if (req.status == "RESPONDED") "${req.responsesCount} Offers" else "Pending Offer",
+                                            color = if (req.status == "RESPONDED") MobiEmerald else MobiCoralPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("👤 Tenant: ${req.tenantName} · 📞 ${req.contactPhone.ifBlank { "Provided in response" }}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("📍 Target: ${req.city} (${req.preferredNeighborhood})", fontSize = 12.sp)
+                                Text("💰 Max Budget: ${req.currency} ${req.maxBudget} · Move-in: ${req.desiredMoveInDate}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MobiCoralPrimary)
+                                Text("🛏️ ${req.bedrooms} Beds · 🚿 ${req.bathrooms} Baths · Lease: ${req.leaseDuration}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (req.requiredAmenities.isNotEmpty()) {
+                                    Text("✨ Amenities: ${req.requiredAmenities.joinToString(", ")}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                if (req.specialRequirements.isNotBlank()) {
+                                    Text("📝 Note: \"${req.specialRequirements}\"", fontSize = 11.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = { requestToRespond = req },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("respond_to_request_${req.id}")
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Respond with Property Option", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (displayedProperties.isEmpty()) {
+                // Requirement 3: If empty, show "No properties yet - Add your first property" empty state.
                 item {
                     Card(
                         shape = RoundedCornerShape(20.dp),
@@ -848,12 +1145,24 @@ fun HostScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = "${currency.format(prop.pricePerNight)} ${prop.priceSuffix}",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                    val origPrice = CurrencyUtil.formatPrice(prop.pricePerNight.toDouble(), prop.currency)
+                                    val convPrice = CurrencyUtil.formatConvertedPrice(prop.pricePerNight.toDouble(), prop.currency, currency.code)
+                                    Column {
+                                        Text(
+                                            text = "$origPrice ${prop.priceSuffix}",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (convPrice != null) {
+                                            Text(
+                                                text = "($convPrice)",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
 
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
@@ -1010,6 +1319,23 @@ fun HostScreen(
         HostNotificationsDialog(
             viewModel = viewModel,
             onDismiss = { showNotificationsDialog = false }
+        )
+    }
+
+    // Property Admin Verification Modal Dialog
+    if (showVerificationModal) {
+        AdminVerificationModalDialog(
+            viewModel = viewModel,
+            onDismiss = { showVerificationModal = false }
+        )
+    }
+
+    // Admin Respond to Tenant Request Dialog
+    requestToRespond?.let { req ->
+        AdminRespondToRequestDialog(
+            request = req,
+            viewModel = viewModel,
+            onDismiss = { requestToRespond = null }
         )
     }
 
@@ -1264,10 +1590,12 @@ fun EditListingDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                val propCurrencyInfo = CurrencyUtil.getCurrencyInfo(property.currency)
                 OutlinedTextField(
                     value = pricePerNight,
                     onValueChange = { pricePerNight = it },
-                    label = { Text("Price per Night (${currency.code})") },
+                    label = { Text("Price per Night (${property.currency})") },
+                    prefix = { Text("${propCurrencyInfo.symbol} ", fontWeight = FontWeight.Bold, color = MobiCoralPrimary) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
@@ -1339,8 +1667,10 @@ fun CreateListingDialog(
     viewModel: MobiHomeViewModel,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val currentUser by viewModel.currentUser.collectAsStateWithLifecycle()
-    val currency by viewModel.currency.collectAsStateWithLifecycle()
+
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var selectedPurpose by remember { mutableStateOf(ListingPurpose.BNB_STAY) }
@@ -1348,283 +1678,630 @@ fun CreateListingDialog(
     var city by remember { mutableStateOf("") }
     var country by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
-    var pricePerNight by remember { mutableStateOf("320") }
+    var selectedCurrencyCode by remember { mutableStateOf("KES") }
+    var pricePerNight by remember { mutableStateOf("25000") }
     var bedrooms by remember { mutableIntStateOf(2) }
     var beds by remember { mutableIntStateOf(3) }
     var bathrooms by remember { mutableIntStateOf(2) }
     var maxGuests by remember { mutableIntStateOf(4) }
     var hostName by remember { mutableStateOf(currentUser?.displayName ?: "") }
     var hostBio by remember { mutableStateOf("Passionate host welcoming worldwide guests to our curated home.") }
-    var selectedImageRes by remember { mutableIntStateOf(R.drawable.img_hero_banner) }
-    var selectedPhotoUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+
+    val base64Images = remember { mutableStateListOf<String>() }
+    var isProcessingPhotos by remember { mutableStateOf(false) }
+    var showCurrencyPicker by remember { mutableStateOf(false) }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
-            selectedPhotoUris = selectedPhotoUris + uris
+            coroutineScope.launch {
+                isProcessingPhotos = true
+                for (uri in uris) {
+                    val b64 = ImageBase64Helper.uriToBase64(context, uri)
+                    if (!b64.isNullOrBlank() && !base64Images.contains(b64)) {
+                        base64Images.add(b64)
+                    }
+                }
+                isProcessingPhotos = false
+            }
         }
     }
 
-    val imageOptions = listOf(
-        R.drawable.img_hero_banner to "Luxury Villa",
-        R.drawable.img_modern_cabin to "Modern Cabin",
-        R.drawable.img_beachfront_villa to "Beachfront",
-        R.drawable.img_urban_penthouse to "City Loft"
-    )
+    val selectedCurrencyInfo = remember(selectedCurrencyCode) {
+        CurrencyUtil.getCurrencyInfo(selectedCurrencyCode)
+    }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(text = "Host a New Property", fontWeight = FontWeight.Bold)
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Listing Purpose Selector
-                Text(
-                    text = "Listing Purpose",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .heightIn(max = 720.dp)
+                .testTag("create_listing_dialog_surface")
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().wrapContentHeight()) {
+                // Header (No empty gaps)
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ListingPurpose.values().forEach { purpose ->
-                        FilterChip(
-                            selected = selectedPurpose == purpose,
-                            onClick = { selectedPurpose = purpose },
-                            label = { Text(purpose.displayName, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MobiCoralPrimary.copy(alpha = 0.15f),
-                                selectedLabelColor = MobiCoralPrimary
-                            )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Host a New Property",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
                         )
+                        Text(
+                            text = "List your property with exact currency and direct base64 photos",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close dialog")
                     }
                 }
 
-                // Property Category / Type Selector
-                Text(
-                    text = "Property Type",
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // Scrollable Form Body (Fixed empty gap by using weight with fill=false)
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    val types = listOf(
-                        PropertyType.ENTIRE_VILLA,
-                        PropertyType.APARTMENT,
-                        PropertyType.OFFICE,
-                        PropertyType.COMMERCIAL_SPACE,
-                        PropertyType.CABIN
+                    // Listing Purpose Selector
+                    Text(
+                        text = "Listing Purpose",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
                     )
-                    types.forEach { type ->
-                        FilterChip(
-                            selected = selectedType == type,
-                            onClick = { selectedType = type },
-                            label = { Text(type.displayName, fontSize = 10.sp) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ListingPurpose.entries.forEach { purpose ->
+                            FilterChip(
+                                selected = selectedPurpose == purpose,
+                                onClick = { selectedPurpose = purpose },
+                                label = { Text(purpose.displayName, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = MobiCoralPrimary.copy(alpha = 0.15f),
+                                    selectedLabelColor = MobiCoralPrimary
+                                )
+                            )
+                        }
+                    }
+
+                    // Property Category / Type Selector
+                    Text(
+                        text = "Property Type",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val types = listOf(
+                            PropertyType.ENTIRE_VILLA,
+                            PropertyType.APARTMENT,
+                            PropertyType.OFFICE,
+                            PropertyType.COMMERCIAL_SPACE,
+                            PropertyType.CABIN
+                        )
+                        types.forEach { type ->
+                            FilterChip(
+                                selected = selectedType == type,
+                                onClick = { selectedType = type },
+                                label = { Text(type.displayName, fontSize = 10.sp) }
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Property Title") },
+                        placeholder = {
+                            Text(
+                                when (selectedPurpose) {
+                                    ListingPurpose.FOR_SALE -> "e.g. Modern Sunset Cliff Villa (For Sale)"
+                                    ListingPurpose.FOR_RENT -> "e.g. Executive Corporate Office Floor"
+                                    ListingPurpose.BNB_STAY -> "e.g. Modern Sunset Cliff Villa"
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = city,
+                            onValueChange = { city = it },
+                            label = { Text("City / Region") },
+                            placeholder = { Text("e.g. Nairobi, Mombasa, Bali") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        OutlinedTextField(
+                            value = country,
+                            onValueChange = { country = it },
+                            label = { Text("Country") },
+                            placeholder = { Text("e.g. Kenya, Indonesia") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
                         )
                     }
-                }
 
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Property Title") },
-                    placeholder = {
-                        Text(
-                            when (selectedPurpose) {
-                                ListingPurpose.FOR_SALE -> "e.g. Modern Sunset Cliff Villa (For Sale)"
-                                ListingPurpose.FOR_RENT -> "e.g. Executive Corporate Office Floor"
-                                ListingPurpose.BNB_STAY -> "e.g. Modern Sunset Cliff Villa"
+                    OutlinedTextField(
+                        value = address,
+                        onValueChange = { address = it },
+                        label = { Text("Address / Neighborhood") },
+                        placeholder = { Text("e.g. Kilimani, Westlands, Kileleshwa") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Rooms & Capacity Steppers
+                    Text(
+                        text = "Rooms & Capacity",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Bedrooms", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { if (bedrooms > 1) bedrooms-- }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                    Text("$bedrooms", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    IconButton(onClick = { if (bedrooms < 20) bedrooms++ }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                }
                             }
-                        )
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        }
 
-                OutlinedTextField(
-                    value = city,
-                    onValueChange = { city = it },
-                    label = { Text("City / Region") },
-                    placeholder = { Text("e.g. Bali, Lake Como, Manhattan") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = country,
-                    onValueChange = { country = it },
-                    label = { Text("Country") },
-                    placeholder = { Text("e.g. Indonesia, Italy, USA") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = pricePerNight,
-                    onValueChange = { pricePerNight = it },
-                    label = {
-                        Text(
-                            when (selectedPurpose) {
-                                ListingPurpose.FOR_SALE -> "Total Sale Price (${currency.code})"
-                                ListingPurpose.FOR_RENT -> "Monthly Rent / Lease (${currency.code})"
-                                ListingPurpose.BNB_STAY -> "Price per Night (${currency.code})"
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Bathrooms", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { if (bathrooms > 1) bathrooms-- }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                    Text("$bathrooms", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    IconButton(onClick = { if (bathrooms < 20) bathrooms++ }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                }
                             }
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        }
 
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Property Description") },
-                    placeholder = { Text("Describe the architecture, amenities, and surroundings...") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Max Guests", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { if (maxGuests > 1) maxGuests-- }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                    Text("$maxGuests", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    IconButton(onClick = { if (maxGuests < 30) maxGuests++ }, modifier = Modifier.size(26.dp)) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
 
-                // Photos & Firebase Storage Section
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
+                    // CURRENCY & PRICING SECTION (Searchable world currencies dropdown, default KES)
+                    Text(
+                        text = "Currency & Pricing",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Surface(
+                        onClick = { showCurrencyPicker = true },
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(text = selectedCurrencyInfo.flag, fontSize = 24.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "Currency: ${selectedCurrencyInfo.code} (${selectedCurrencyInfo.symbol})",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${selectedCurrencyInfo.name}${if (selectedCurrencyCode == "KES") " · Default KES" else ""}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.Default.ArrowDropDown,
+                                contentDescription = "Select Currency",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = pricePerNight,
+                        onValueChange = { pricePerNight = it },
+                        label = {
+                            Text(
+                                when (selectedPurpose) {
+                                    ListingPurpose.FOR_SALE -> "Total Sale Price (${selectedCurrencyInfo.code})"
+                                    ListingPurpose.FOR_RENT -> "Monthly Rent / Lease (${selectedCurrencyInfo.code})"
+                                    ListingPurpose.BNB_STAY -> "Price per Night (${selectedCurrencyInfo.code})"
+                                }
+                            )
+                        },
+                        prefix = {
+                            Text(
+                                text = "${selectedCurrencyInfo.symbol} ",
+                                fontWeight = FontWeight.Bold,
+                                color = MobiCoralPrimary
+                            )
+                        },
+                        supportingText = {
+                            val rawNum = pricePerNight.toIntOrNull()
+                            if (rawNum != null) {
                                 Text(
-                                    text = "Host Photos",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp
-                                )
-                                Text(
-                                    text = "Will be saved to Firebase Storage",
+                                    text = "Saved in Firestore as: price $rawNum, currency: \"${selectedCurrencyInfo.code}\" (Exact number, no *130)",
                                     fontSize = 11.sp,
                                     color = MobiEmerald
                                 )
                             }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-                            Button(
-                                onClick = {
-                                    photoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Property Description") },
+                        placeholder = { Text("Describe the architecture, amenities, and surroundings...") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // PROPERTY PHOTOS (Direct Base64 Upload, NO PLACEHOLDERS)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.AddPhotoAlternate,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Photos", fontSize = 11.sp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Property Photos",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "Converted to base64 & stored directly in Firestore",
+                                        fontSize = 11.sp,
+                                        color = MobiEmerald
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        photoPickerLauncher.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                        )
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.AddPhotoAlternate,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Add Photos", fontSize = 12.sp)
+                                }
                             }
-                        }
 
-                        if (selectedPhotoUris.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "${selectedPhotoUris.size} photo(s) selected for Firebase upload",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MobiEmerald
-                            )
-                        }
-                    }
-                }
+                            if (isProcessingPhotos) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Converting photo to base64...", fontSize = 12.sp)
+                                }
+                            }
 
-                Text(text = "Default Cover Style", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    imageOptions.forEach { (resId, label) ->
-                        val isSelected = selectedImageRes == resId
-                        Card(
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(
-                                2.dp,
-                                if (isSelected) MobiCoralPrimary else Color.Transparent
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { selectedImageRes = resId }
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Image(
-                                    painter = painterResource(id = resId),
-                                    contentDescription = label,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(48.dp)
-                                )
+                            if (base64Images.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(base64Images) { index, b64 ->
+                                        val bytes = remember(b64) { ImageBase64Helper.decodeBase64ToByteArray(b64) }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(88.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .border(
+                                                    1.5.dp,
+                                                    if (index == 0) MobiCoralPrimary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                                    RoundedCornerShape(10.dp)
+                                                )
+                                        ) {
+                                            if (bytes != null) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(bytes)
+                                                        .crossfade(true)
+                                                        .build(),
+                                                    contentDescription = "Uploaded Photo $index",
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            }
+                                            if (index == 0) {
+                                                Surface(
+                                                    color = MobiCoralPrimary,
+                                                    shape = RoundedCornerShape(bottomEnd = 6.dp),
+                                                    modifier = Modifier.align(Alignment.TopStart)
+                                                ) {
+                                                    Text(
+                                                        text = "Cover",
+                                                        color = Color.White,
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                            IconButton(
+                                                onClick = { base64Images.removeAt(index) },
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .size(24.dp)
+                                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Remove photo",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = label,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    modifier = Modifier.padding(4.dp)
+                                    text = "${base64Images.size} photo(s) selected. Direct base64 string will be saved to imageUrl & images[].",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (title.isNotBlank() && city.isNotBlank()) {
-                        viewModel.createHostListing(
-                            title = title,
-                            description = description.ifBlank { "A stylish, curated residence on MobiHome with modern amenities." },
-                            propertyType = selectedType,
-                            city = city,
-                            country = country.ifBlank { "Worldwide" },
-                            address = address.ifBlank { "$city Central Area" },
-                            pricePerNight = pricePerNight.toIntOrNull() ?: 250,
-                            bedrooms = bedrooms,
-                            beds = beds,
-                            bathrooms = bathrooms,
-                            maxGuests = maxGuests,
-                            hostName = hostName,
-                            hostBio = hostBio,
-                            imageResId = selectedImageRes,
-                            listingPurpose = selectedPurpose,
-                            initialPhotoUris = selectedPhotoUris
-                        )
-                        onDismiss()
+
+                // Sticky Bottom Action Bar
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
-                enabled = title.isNotBlank() && city.isNotBlank(),
-                modifier = Modifier.testTag("publish_listing_button")
-            ) {
-                Text("Publish Listing", fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Button(
+                        onClick = {
+                            val parsedPrice = pricePerNight.toIntOrNull()
+                            if (title.isNotBlank() && city.isNotBlank() && parsedPrice != null) {
+                                val primaryBase64 = base64Images.firstOrNull() ?: ""
+                                viewModel.createHostListing(
+                                    title = title.trim(),
+                                    description = description.ifBlank { "A stylish, curated residence on MobiHome with modern amenities." },
+                                    propertyType = selectedType,
+                                    city = city.trim(),
+                                    country = country.ifBlank { "Kenya" }.trim(),
+                                    address = address.ifBlank { "$city Central Area" }.trim(),
+                                    pricePerNight = parsedPrice, // EXACT number, NO multiplication
+                                    bedrooms = bedrooms,
+                                    beds = beds,
+                                    bathrooms = bathrooms,
+                                    maxGuests = maxGuests,
+                                    hostName = hostName.ifBlank { currentUser?.displayName ?: "Host" },
+                                    hostBio = hostBio,
+                                    currency = selectedCurrencyCode, // EXACT currency chosen by user
+                                    imageUrl = primaryBase64,
+                                    base64Images = base64Images.toList(),
+                                    imageResId = 0,
+                                    listingPurpose = selectedPurpose
+                                )
+                                onDismiss()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MobiCoralPrimary),
+                        enabled = title.isNotBlank() && city.isNotBlank() && pricePerNight.toIntOrNull() != null,
+                        modifier = Modifier.testTag("publish_listing_button")
+                    ) {
+                        Text("Publish Listing", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
-    )
+    }
+
+    // Searchable World Currency Picker Modal Dialog
+    if (showCurrencyPicker) {
+        var pickerSearchQuery by remember { mutableStateOf("") }
+        val filteredCurrencies = remember(pickerSearchQuery) {
+            if (pickerSearchQuery.isBlank()) {
+                CurrencyUtil.supportedCurrencies
+            } else {
+                CurrencyUtil.supportedCurrencies.filter {
+                    it.code.contains(pickerSearchQuery, ignoreCase = true) ||
+                    it.name.contains(pickerSearchQuery, ignoreCase = true) ||
+                    it.symbol.contains(pickerSearchQuery, ignoreCase = true)
+                }
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showCurrencyPicker = false },
+            title = {
+                Column {
+                    Text("Select Listing Currency", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        "Your price will be saved in this exact currency without multipliers.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = pickerSearchQuery,
+                        onValueChange = { pickerSearchQuery = it },
+                        placeholder = { Text("Search currency (e.g. KES, USD, EUR, GBP)") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        },
+                        trailingIcon = {
+                            if (pickerSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { pickerSearchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp)
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(filteredCurrencies, key = { it.code }) { curr ->
+                            val isSelected = selectedCurrencyCode.equals(curr.code, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isSelected) MobiCoralPrimary.copy(alpha = 0.12f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable {
+                                        selectedCurrencyCode = curr.code
+                                        showCurrencyPicker = false
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = curr.flag, fontSize = 22.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${curr.name} (${curr.code})",
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${curr.symbol}${if (curr.code == "KES") " · Default (Base)" else ""}",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MobiCoralPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCurrencyPicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }

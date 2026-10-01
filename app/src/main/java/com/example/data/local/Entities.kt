@@ -59,4 +59,53 @@ data class PropertyPhotoEntity(
     val fileSizeKb: Int = 0
 )
 
+@Entity(tableName = "recent_searches")
+data class RecentSearchEntity(
+    @PrimaryKey val query: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "tenant_property_requests")
+data class TenantPropertyRequestEntity(
+    @PrimaryKey val id: String,
+    val tenantId: String,
+    val tenantName: String,
+    val tenantEmail: String,
+    val tenantPhone: String = "",
+    val title: String,
+    val purpose: String = "FOR_RENT", // BNB_STAY, FOR_RENT, FOR_SALE
+    val city: String,
+    val neighborhood: String = "",
+    val maxBudget: Double,
+    val currency: String = "KES",
+    val bedrooms: Int = 1,
+    val bathrooms: Int = 1,
+    val moveInDate: String = "Immediate / Flexible",
+    val leaseDuration: String = "12 Months",
+    val requiredAmenities: String = "", // Comma-separated amenity strings
+    val notes: String = "",
+    val status: String = "OPEN", // "OPEN", "RESPONDED", "CLOSED"
+    val responsesCount: Int = 0,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "tenant_request_responses")
+data class TenantRequestResponseEntity(
+    @PrimaryKey val id: String,
+    val requestId: String,
+    val adminId: String,
+    val adminName: String,
+    val adminEmail: String = "",
+    val adminPhone: String = "",
+    val isAdminVerified: Boolean = false,
+    val propertyId: String? = null,
+    val propertyTitle: String,
+    val offeredPrice: Double,
+    val currency: String = "KES",
+    val propertyLocation: String = "",
+    val propertyImage: String? = null,
+    val message: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 

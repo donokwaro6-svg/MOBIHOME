@@ -1,5 +1,18 @@
 package com.example.model
 
+enum class UserRole(val label: String, val badge: String, val description: String) {
+    PROPERTY_SEEKER(
+        label = "Property Seeker",
+        badge = "Seeker / Tenant",
+        description = "Find and book vacation stays, rent homes, or submit custom property requests to admins."
+    ),
+    PROPERTY_ADMIN(
+        label = "Property Admin",
+        badge = "Property Admin",
+        description = "List & manage properties, view tenant requirements, respond with offers, and access verification."
+    )
+}
+
 data class AuthUser(
     val uid: String,
     val displayName: String,
@@ -12,7 +25,12 @@ data class AuthUser(
     val isEmailVerified: Boolean = false,
     val isSuperhost: Boolean = false,
     val memberSince: String = "2026",
-    val provider: String = "Google / Firebase"
+    val provider: String = "Google / Firebase",
+    val role: UserRole = UserRole.PROPERTY_SEEKER,
+    val isVerifiedAdmin: Boolean = false,
+    val verificationPaidUntil: Long? = null,
+    val totalTenantsCount: Int = 0,
+    val occupancyRatePercent: Double = 0.0
 ) {
     val initials: String
         get() {
@@ -24,6 +42,26 @@ data class AuthUser(
                 else -> "MH"
             }
         }
+
+    val isPaidVerificationActive: Boolean
+        get() = verificationPaidUntil != null && verificationPaidUntil > System.currentTimeMillis()
+
+    val occupancyRate: Double
+        get() = occupancyRatePercent
+
+    val totalTenants: Int
+        get() = totalTenantsCount
+
+    fun isAutoVerified(listedPropertiesCount: Int): Boolean {
+        return listedPropertiesCount > 70 && totalTenantsCount > 150 && occupancyRatePercent > 60.0
+    }
+
+    fun isEffectivelyVerified(listedPropertiesCount: Int): Boolean {
+        if (role != UserRole.PROPERTY_ADMIN) return false
+        if (isVerifiedAdmin) return true
+        if (isPaidVerificationActive) return true
+        return isAutoVerified(listedPropertiesCount)
+    }
 }
 
 sealed interface AuthState {

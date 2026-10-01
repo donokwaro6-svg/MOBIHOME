@@ -4,10 +4,21 @@ import android.content.Context
 import android.net.Uri
 import com.example.data.firebase.FirebasePhotoService
 import com.example.data.firebase.FirestorePropertyService
+import com.example.data.firebase.FirebaseConfig
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.data.local.BookingDao
 import com.example.data.local.BookingEntity
 import com.example.data.local.HostNotificationDao
 import com.example.data.local.HostNotificationEntity
+import com.example.data.local.RecentSearchDao
+import com.example.data.local.RecentSearchEntity
+import com.example.data.local.TenantPropertyRequestDao
+import com.example.data.local.TenantPropertyRequestEntity
+import com.example.data.local.TenantRequestResponseEntity
 import com.example.data.local.WishlistDao
 import com.example.data.local.WishlistEntity
 import com.example.model.BookingReservation
@@ -30,9 +41,113 @@ class PropertyRepository(
     private val wishlistDao: WishlistDao,
     private val bookingDao: BookingDao,
     private val hostNotificationDao: HostNotificationDao,
+    private val recentSearchDao: RecentSearchDao,
+    private val tenantPropertyRequestDao: TenantPropertyRequestDao,
     val firebasePhotoService: FirebasePhotoService,
     val firestorePropertyService: FirestorePropertyService
 ) {
+
+    // Local Room Recent Searches
+    val recentSearches: Flow<List<RecentSearchEntity>> = recentSearchDao.getRecentSearches(15)
+
+    suspend fun addRecentSearch(query: String) = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            recentSearchDao.insertSearch(RecentSearchEntity(query = trimmed, timestamp = System.currentTimeMillis()))
+        }
+    }
+
+    suspend fun removeRecentSearch(query: String) = withContext(Dispatchers.IO) {
+        recentSearchDao.deleteSearch(query)
+    }
+
+    suspend fun clearRecentSearches() = withContext(Dispatchers.IO) {
+        recentSearchDao.clearAllSearches()
+    }
+
+    // Tenant Property Requests & Admin Responses
+    val allTenantRequests: Flow<List<TenantPropertyRequestEntity>> = tenantPropertyRequestDao.getAllRequests()
+    val allRequestResponses: Flow<List<TenantRequestResponseEntity>> = tenantPropertyRequestDao.getAllResponses()
+
+    fun getTenantRequests(tenantId: String): Flow<List<TenantPropertyRequestEntity>> {
+        return tenantPropertyRequestDao.getRequestsByTenant(tenantId)
+    }
+
+    fun getResponsesForRequest(requestId: String): Flow<List<TenantRequestResponseEntity>> {
+        return tenantPropertyRequestDao.getResponsesForRequest(requestId)
+    }
+
+    suspend fun submitTenantPropertyRequest(request: TenantPropertyRequestEntity) = withContext(Dispatchers.IO) {
+        tenantPropertyRequestDao.insertRequest(request)
+        try {
+            val firestore = FirebaseConfig.getFirestore(context)
+            val data = hashMapOf(
+                "id" to request.id,
+                "tenantId" to request.tenantId,
+                "tenantName" to request.tenantName,
+                "tenantEmail" to request.tenantEmail,
+                "tenantPhone" to request.tenantPhone,
+                "title" to request.title,
+                "purpose" to request.purpose,
+                "city" to request.city,
+                "neighborhood" to request.neighborhood,
+                "maxBudget" to request.maxBudget,
+                "currency" to request.currency,
+                "bedrooms" to request.bedrooms,
+                "bathrooms" to request.bathrooms,
+                "moveInDate" to request.moveInDate,
+                "leaseDuration" to request.leaseDuration,
+                "requiredAmenities" to request.requiredAmenities,
+                "notes" to request.notes,
+                "status" to request.status,
+                "responsesCount" to request.responsesCount,
+                "createdAt" to request.createdAt
+            )
+            firestore?.collection("property_requests")?.document(request.id)?.set(data)?.await()
+        } catch (e: Exception) {
+            Log.w("PropertyRepository", "Firestore submit request: ${e.message}")
+        }
+    }
+
+    suspend fun submitAdminResponseToRequest(response: TenantRequestResponseEntity) = withContext(Dispatchers.IO) {
+        tenantPropertyRequestDao.insertResponse(response)
+        tenantPropertyRequestDao.incrementResponseCount(response.requestId)
+        try {
+            val firestore = FirebaseConfig.getFirestore(context)
+            val data = hashMapOf(
+                "id" to response.id,
+                "requestId" to response.requestId,
+                "adminId" to response.adminId,
+                "adminName" to response.adminName,
+                "adminEmail" to response.adminEmail,
+                "adminPhone" to response.adminPhone,
+                "isAdminVerified" to response.isAdminVerified,
+                "propertyId" to (response.propertyId ?: ""),
+                "propertyTitle" to response.propertyTitle,
+                "offeredPrice" to response.offeredPrice,
+                "currency" to response.currency,
+                "propertyLocation" to response.propertyLocation,
+                "propertyImage" to (response.propertyImage ?: ""),
+                "message" to response.message,
+                "createdAt" to response.createdAt
+            )
+            firestore?.collection("tenant_request_responses")?.document(response.id)?.set(data)?.await()
+            firestore?.collection("property_requests")?.document(response.requestId)
+                ?.update("status", "RESPONDED")?.await()
+        } catch (e: Exception) {
+            Log.w("PropertyRepository", "Firestore submit response: ${e.message}")
+        }
+    }
+
+    suspend fun deleteTenantRequest(requestId: String) = withContext(Dispatchers.IO) {
+        tenantPropertyRequestDao.deleteRequest(requestId)
+        try {
+            val firestore = FirebaseConfig.getFirestore(context)
+            firestore?.collection("property_requests")?.document(requestId)?.delete()?.await()
+        } catch (e: Exception) {
+            Log.w("PropertyRepository", "Firestore delete request: ${e.message}")
+        }
+    }
 
     val wishlistedIds: Flow<Set<String>> = wishlistDao.getAllWishlist().map { list ->
         list.map { it.propertyId }.toSet()
@@ -248,6 +363,9 @@ class PropertyRepository(
         hostName: String,
         hostBio: String,
         listingPurpose: String = "BNB_STAY",
+        currency: String = "KES",
+        imageUrl: String = "",
+        images: List<String> = emptyList(),
         imageUris: List<Uri> = emptyList(),
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): String {
@@ -267,6 +385,9 @@ class PropertyRepository(
             hostName = hostName,
             hostBio = hostBio,
             listingPurpose = listingPurpose,
+            currency = currency,
+            imageUrl = imageUrl,
+            images = images,
             imageUris = imageUris,
             onProgress = onProgress
         )

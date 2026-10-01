@@ -93,3 +93,55 @@ interface HostNotificationDao {
     suspend fun clearAll()
 }
 
+@Dao
+interface RecentSearchDao {
+    @Query("SELECT * FROM recent_searches ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentSearches(limit: Int = 10): Flow<List<RecentSearchEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSearch(search: RecentSearchEntity)
+
+    @Query("DELETE FROM recent_searches WHERE query = :query")
+    suspend fun deleteSearch(query: String)
+
+    @Query("DELETE FROM recent_searches")
+    suspend fun clearAllSearches()
+}
+
+@Dao
+interface TenantPropertyRequestDao {
+    @Query("SELECT * FROM tenant_property_requests ORDER BY createdAt DESC")
+    fun getAllRequests(): Flow<List<TenantPropertyRequestEntity>>
+
+    @Query("SELECT * FROM tenant_property_requests WHERE tenantId = :tenantId ORDER BY createdAt DESC")
+    fun getRequestsByTenant(tenantId: String): Flow<List<TenantPropertyRequestEntity>>
+
+    @Query("SELECT * FROM tenant_property_requests WHERE id = :id LIMIT 1")
+    suspend fun getRequestById(id: String): TenantPropertyRequestEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRequest(request: TenantPropertyRequestEntity)
+
+    @Query("UPDATE tenant_property_requests SET status = :status, responsesCount = responsesCount + 1 WHERE id = :id")
+    suspend fun incrementResponseCount(id: String, status: String = "RESPONDED")
+
+    @Query("UPDATE tenant_property_requests SET status = :status WHERE id = :id")
+    suspend fun updateRequestStatus(id: String, status: String)
+
+    @Query("DELETE FROM tenant_property_requests WHERE id = :id")
+    suspend fun deleteRequest(id: String)
+
+    // Admin Responses
+    @Query("SELECT * FROM tenant_request_responses ORDER BY createdAt DESC")
+    fun getAllResponses(): Flow<List<TenantRequestResponseEntity>>
+
+    @Query("SELECT * FROM tenant_request_responses WHERE requestId = :requestId ORDER BY createdAt DESC")
+    fun getResponsesForRequest(requestId: String): Flow<List<TenantRequestResponseEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertResponse(response: TenantRequestResponseEntity)
+
+    @Query("DELETE FROM tenant_request_responses WHERE id = :id")
+    suspend fun deleteResponse(id: String)
+}
+
